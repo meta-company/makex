@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "makex"
+version = "20240103"
+description = "Build tool"
+readme = "README.md"
+license = {file = "LICENSE.md"}
+requires-python = ">=3.9"
+dependencies = [
+    "reflink>=0.2.2",
+    "xattr>=1.0.0",
+    "toml>=0.10.2",
+    "progressbar2>=4.3.2",
+]
+authors = [
+    {name = "Nate Skulic"},
+    {name = "MetaCompany" },
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov ~=3.0.0",
+]
+documents = [
+    "sphinx",
+    "sphinx-better-theme",
+    "myst-parser",
+    "markdown-it-py[linkify,plugins]"
+]
+
+[project.scripts]
+makex = "makex.__main__:main"
+
+
+[tool.setuptools.packages.find]
+where = ["python"]
+#include = ["*", "themes"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"makex.data.completions" =[
+    "*.bash",
+    "*.zsh",
+]
+#"documents" = ["documents"]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "5"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"

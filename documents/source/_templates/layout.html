@@ -1,0 +1,84 @@
+{% extends '!layout.html' %}
+{# we're overloading betters layout.html because we use a custom authors/copyright/footer document #}
+{%- block footer %}
+<footer id="pagefooter" class="footer" role="contentinfo">
+    {%- if show_copyright %}
+    {%- if hasdoc('authors') %}
+    <div>
+    {% trans path=pathto('authors'), copyright=copyright|e %}
+    <a href="{{ path }}">&copy; {{ copyright }}</a>
+    {% endtrans %}
+    </div>
+    {%- else %}
+    {%- trans copyright=copyright|e -%}
+    <div>&copy; {{ copyright }}</div>
+    {%- endtrans %}
+    {%- endif %}
+    {%- endif %}
+    <div class="mute">Supported by <a href="https://meta.company">MetaCompany</a></div>
+
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-NWZ09K8RTV"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-NWZ09K8RTV');
+    </script>
+</footer>
+{%- endblock %}
+
+{# adding a copy of the toc on top of the document for mobile. #}
+{%- block content %}
+{%- block sidebar1 %} {# possible location for sidebar #} {% endblock %}
+<div class="document" document="{{pagename}}">
+
+
+    {%- if display_toc and render_sidebar %}
+    {%- for sidebartemplate in sidebars %}
+        {%if sidebartemplate == "localtoc.html" %}
+            <div class="localtoc" style="display: none">
+                <h3>{{ _('Table of Contents') }}</h3>
+                {{ toc }}
+            </div>
+        {%endif%}
+    {%endfor%}
+    {%- endif %}
+    {%- block document %}
+    <div class="documentwrapper">
+        {%- if render_sidebar %}
+        <div class="bodywrapper">
+            {%- endif %}
+            <div class="body" role="main">
+                {% block body %} {% endblock %}
+                <div class="clearer"></div>
+            </div>
+            {%- if render_sidebar %}
+        </div>
+        {%- endif %}
+    </div>
+    {%- endblock %}
+
+    {%- block sidebar2 %}{{ sidebar() }}{% endblock %}
+    <div class="clearer"></div>
+</div>
+{%- endblock %}
+
+{#
+Removed the following because they are non-standard.
+rel=copyright hasdoc('copyright')
+rel=index hasdoc('genindex')
+#}
+{%- block linktags %}
+{%- if hasdoc('about') %}
+<link rel="author" title="{{ _('The Authors') }}" href="{{ pathto('authors') }}" />
+{%- endif %}
+{%- if hasdoc('search') %}
+<link rel="search" title="{{ _('Search') }}" href="{{ pathto('search') }}" />
+{%- endif %}
+{%- if next %}
+<link rel="next" title="{{ next.title|striptags|e }}" href="{{ next.link|e }}" />
+{%- endif %}
+{%- if prev %}
+<link rel="prev" title="{{ prev.title|striptags|e }}" href="{{ prev.link|e }}" />
+{%- endif %}
+{%- endblock %}

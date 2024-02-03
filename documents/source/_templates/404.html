@@ -1,0 +1,54 @@
+<html>
+<head>
+    <link rel="stylesheet" type="text/css" href="{{pathto("/_static/better.css",1)}}"/>
+    <link rel="stylesheet" type="text/css" href="{{pathto("/_static/custom.css",1)}}"/>
+    <link rel="search" title="Search" href="{{pathto("search")}}"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>{{title}}</title>
+<body>
+<header id="pageheader">
+    <h1><a href="{{pathto("index")}}">Makex Documentation</a></h1>
+</header>
+<div class="document" document="error">
+    <div class="documentwrapper">
+        <div class="bodywrapper">
+            <div class="body" role="main">
+                <section class="tex2jax_ignore mathjax_ignore" id="makex">
+                {{body}}
+                </section>
+                <section>
+                    <a id="suggested-search">Search for potentially related pages</a>
+                    <script>
+                        // turn a URL like /<lang>/<version>/some_directory/some-page.html into a search for "some directory some page"
+                        let parts = document.location.pathname.split(/\//g);
+
+                        // parts = ["", "<lang>", "<version>", ...], and we need /<lang>/<version>/search.html
+                        let searchPage = parts.slice(0, -1).join("/") + "/search.html";
+
+                        console.log(searchPage);
+
+                        // take the rest of the URL path, remove the file extension (if it exists), and use the alphanumeric components as the search input.
+                        let notFound = parts.slice(-2, -1);
+                        let withoutExtension = parts[parts.length - 1].replace(/\.[^.]*$/, "");
+                        notFound.push(withoutExtension);
+                        let terms = notFound.join(" ").replace(/[^a-zA-Z0-9]+/g, " ");
+
+                        // build and write in the URL
+                        let url = searchPage + "?q=" + encodeURIComponent(terms);
+                        document.getElementById("suggested-search").href = url;
+                    </script>
+
+                </section>
+                <div class="clearer"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<footer id="pagefooter" class="footer" role="contentinfo">
+    <div>
+        <a href="{{pathto("authors")}}">&copy; 2024 Makex Authors</a>
+    </div>
+    <div>Supported by <a href="https://meta.company">MetaCompany</a></div>
+</footer>
+</body>
+</html>

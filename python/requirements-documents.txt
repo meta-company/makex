@@ -1,0 +1,7 @@
+
+# documentation:
+sphinx
+sphinx-better-theme
+myst-parser
+markdown-it-py[linkify,plugins]
+sphinx-notfound-page

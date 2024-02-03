@@ -1,0 +1,21 @@
+syntax: glob
+
+*.pyc
+.hg
+.venv
+_build_
+*~
+__pycache__
+.git
+.pytest_cache
+.venv
+.mypy_cache
+.idea
+_output_
+PRIVATE.md
+TODO.md
+*.iml
+*.callgrind
+callgrind.*
+experiments
+*.gz
