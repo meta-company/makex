@@ -24,6 +24,8 @@ Makex uses a strategy to hash Targets. Hashing a Target involves making a unique
 - The Makex file in which the target was defined. Note: Any changes to this file will cause a target to become stale.
 - Any "used" Environment variables. Environment variables which are used in a Makex file are recorded.
 
+If any of these change, the Target will be rebuilt.
+
 ## Where hashes are stored
 
 Typically, Makex stores hashes and fingerprints in the extended attributes of a file.

@@ -37,10 +37,12 @@ The current Workspace is detected with the following order of precedence:
 <!-- The {option}`--workspace<makex --workspace>` command line argument. -->
 
 <!-- The {data}`makex.workspace<TOML.makex.workspace>` setting in a Makex Configuration File specified with the {option}`--configuration <makex --configuration>` command line argument.-->
+
 - A file named WORKSPACE file detected inside current working directory or one of its parents.
 - The {envvar}`WORKSPACE<WORKSPACE>` environment variable.
-- The {data}`makex.workspace<TOML.makex.workspace>` setting in of the global Makex Configuration Files (`~/.config/makex.toml` or `/etc/makex.toml`). -->
 - The root/anchor of the current working directory.
+
+<!-- - The {data}`makex.workspace<TOML.makex.workspace>` setting in of the global Makex Configuration Files (`~/.config/makex.toml` or `/etc/makex.toml`). -->
 
 <!-- The {data}`makex.workspace<TOML.makex.workspace>` setting in Makex Configuration Files from the current working directory or one of the parents.
 

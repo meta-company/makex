@@ -40,12 +40,13 @@ target(
         # relative path to file (from the directory of this makex file)
         "path/to/file",
         
-        # local target
+        # File local target, named "target-name"
         ":target-name",
         
-        # target in path/to/target
+        # Target in path/to/target, named "target-name"
         "path/to/target:target-name"
         
+        # Target in workspace path, named "target-name"
         "//path/to/target:target-name"
     ]
 )
@@ -73,6 +74,7 @@ added to this list. The output files should be listed with paths relative to the
 
 If a target has outputs, makex will use hashes, checksums and caching strategies to see if the target needs to be run to reproduce the outputs.
 
-A target with no defined output files will always be run.
+A target with no defined output files will always be run. If there no output files, Makex will be unable to determine if the target is stale, and therefore
+will consider the target always stale.
 
 Changes to a target or any of its input files will cause a target to run and reproduce the outputs.

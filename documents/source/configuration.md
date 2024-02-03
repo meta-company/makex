@@ -12,21 +12,7 @@ The configuration file itself may be located in a number of places:
 - The global/system configuration directory (`/etc/makex.toml`)
 
 All of these places are checked in order, and the configuration is merged with the same precedence.
-For example, this means that the a `make.toml` in the current working directory overrides any values in the users or global. 
-
-The default configuration is below:
-
-```toml
-
-[makex]
-files = ["Makexfile", "makexfile"]
-ignore = []
-```
-
-
-```{tip}
-It's generally recommened to add a ignores like `.git` or `.hg` to exclude these directories from processing. 
-```
+For example, this means that the a `make.toml` in the current working directory overrides any values in the users or global.
 
 ## Sections
 
@@ -97,7 +83,17 @@ toml configuration files are specified with sections. `makex` is the primary sec
        
        The prefixes `re:` and `glob:` are used to denote regular expressions and globs. 
       
-       Makex will always ignore it's default output directory (`_output_`).       
+       Makex will always ignore it's default output directory (`_output_`).   
+       
+       .. note:: 
+       
+         Makex is configured to ignore common files/folders usually not used as inputs/outputs.
+         
+         The list of these things include common cache/test folders (e.g. `.venv`, `__pycache__`, `.pytest_cache`),
+         repository folders (e.g. `.hg` or `.git`), files typically not included in outputs (`*.pyc`) and any
+         target output folders (named `_output_`).
+       
+            
 
 ```
 

@@ -141,7 +141,6 @@ Blank example of creating a target named `name`:
 ```python
 target(
     name="name",
-    path=None,
     requires=[
     ],
     runs=[
@@ -301,9 +300,9 @@ Each target can accept a list of "Runnables". These are a list of things that wi
 ```{eval-rst}
 .. py:function:: write(file:PathLike, data:Union[str,list[str]], executable:bool=False)
   
-  Writes `data` to `destination`.
+  Writes `data` to `file`.
   
-  :param PathLike destination: The destination. May be a Workspace path, an absolute path, or relative path within the target path.
+  :param PathLike file: The destination file. May be a Workspace path, an absolute path, or relative path within the target path.
   :param Union[str,list[str]] data: The data to write, may be a list of strings which will be concatenated.
   :param bool executable: Ensure the file is executable.
 ```
@@ -321,7 +320,7 @@ Each target can accept a list of "Runnables". These are a list of things that wi
     You should seriously avoid use of this function. Shells may introduce unexpected behavior in Makex.
     
     For example, the line `shell(f"rm {SOME_VARIABLE}/bin")`) will attempt to remove your `/bin` directory if
-    SOME_VARIABLE is define to an empty string.  
+    SOME_VARIABLE is defined as an empty string.  
     
     shell() is there if you really need it, and additional mechanisms will be employed in the future to increase safety. Keep your
     scripts simple.
@@ -329,9 +328,9 @@ Each target can accept a list of "Runnables". These are a list of things that wi
     Makex may a adopt a "strict" mode where all shell scripting is disabled.
   
   By default, Makex will use the detected/system shell (usually, `sh`, or the Bourne Shell). A shell can be specified in configuration, but it's
-  recommened to leave to autodectect based on platform. 
+  recommened to leave it to autodectect based on platform. 
     
-  The shell is prefixed with a preamble: 
+  The passed script is prefixed with a preamble by default: 
   
   .. code-block:: shell
   

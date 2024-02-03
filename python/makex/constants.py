@@ -96,8 +96,6 @@ DEFAULT_IGNORE_NAMES = {
 
 DEFAULT_IGNORE_EXTENSIONS = {
     '.pyc',
-    ".o",
-    ".so",
 }
 
 if False:
@@ -112,5 +110,5 @@ if False:
     DEFAULT_IGNORE_PATTERN = "^(?={0})".format("|".join(DEFAULT_IGNORE_PATTERNS))
 else:
     # precompile the pattern for reduced start up time.
-    DEFAULT_IGNORE_PATTERN = '^(?=(?s:.*(\.o|\.so|\.pyc))\Z|(?s:.*(_output_|.pytest_cache|.hg|.venv|.git|__pycache__))\Z)'
+    DEFAULT_IGNORE_PATTERN = '^(?=(?s:.*(\.pyc))\Z|(?s:.*(_output_|.pytest_cache|.hg|.venv|.git|__pycache__))\Z)'
 

@@ -4,7 +4,10 @@ Note: This file must be run with the MAKEX_DEVELOPER environment variable to som
 
 """
 VENV = path("venv")
-VERSION = "20240103"
+
+# NOTE: You MUST update the version in pyproject.toml.
+# TODO: update the pyproject.toml automatically
+VERSION = "20240201"
 
 target(
     name="hello-world",

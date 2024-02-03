@@ -80,4 +80,4 @@ You may email this text as an attachment to [makex@googlegroups.com](mailto://ma
 
 ### I have some other problem
 
-You may email them at [makex@googlegroups.com](mailto://makex@googlegroups.com) or post it using [Google Groups](https://groups.google.com/g/makex).
+You may email them to [makex@googlegroups.com](mailto://makex@googlegroups.com) or post it using [Google Groups](https://groups.google.com/g/makex).

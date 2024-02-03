@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "makex"
-version = "20240103"
+version = "20240201"
 description = "Build tool"
 readme = "README.md"
 license = {file = "LICENSE.md"}

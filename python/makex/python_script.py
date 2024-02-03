@@ -227,7 +227,7 @@ class _TransformStringValues(ast.NodeTransformer):
 
     def visit_Constant(self, node: ast.Constant) -> Any:
         if isinstance(node.value, str):
-            logging.debug("Got string cnst %s %s", node.value, node.lineno)
+            #logging.debug("Got string cnst %s %s", node.value, node.lineno)
             file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
 
             # TODO: separate the values into JoinedString class so we can evaluate later.
@@ -252,7 +252,7 @@ class _TransformStringValues(ast.NodeTransformer):
             )
             return strcall
         else:
-            logging.debug("Got other const %r", node.value)
+            #logging.debug("Got other const %r", node.value)
             return node
 
     def visit_JoinedStr(self, node: ast.JoinedStr) -> Any:
