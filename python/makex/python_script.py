@@ -3,8 +3,8 @@
 Notes:
 
 - This module designed to stay in a single file.
-- Do not import 3rd party
-- Do not split this items in this file into separate modules/packages.
+- Do not import 3rd party.
+- Do not split items in this file into separate modules/packages.
 
 """
 import ast
@@ -78,11 +78,11 @@ class BaseScriptEnvironment(ABC):
 
 class PythonScriptError(Exception):
     path: Path = None
+    location: FileLocation = None
 
     def __init__(self, message, location: FileLocation):
         super().__init__(str(message))
         self.wraps = Exception(message) if isinstance(message, str) else message
-
         self.location = location
 
     def with_path(self, path):
@@ -219,7 +219,7 @@ class _TransformStringValues(ast.NodeTransformer):
 
     def visit_Call(self, node: ast.Call) -> Any:
         if node.func and isinstance(node.func, ast.Name) and node.func.id == FILE_LOCATION_NAME:
-            # Dont step on the FileLocation() adding pass.
+            # Don't step on the FileLocation() adding pass.
             # return the node and don't process the FileLocation children.
             return node
         self.generic_visit(node)
@@ -296,7 +296,7 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
     """ This pass gives us the highest possible accuracy for locations of calls.
 
         Because the ast module doesn't preserve comments/etc, the locations of various things are incorrect when using
-        inspect. BONUS: This might be a little faster then using inspect.
+        inspect. BONUS: This might be a little faster than using inspect.
 
         We add the FILE_LOCATION_ARGUMENT_NAME= keyword argument to all known calls in the file.
     """
@@ -435,7 +435,9 @@ class _TransformListValues(ast.NodeTransformer):
         #    return ast.copy_location(node, node)
         #return ast.copy_location(ast.NameConstant(value=None), node)
         _node = ast.Call(
-            func=ast.Name(id=LIST_VALUE_NAME, ctx=ast.Load(), lineno=node.lineno,  col_offset=node.col_offset),
+            func=ast.Name(
+                id=LIST_VALUE_NAME, ctx=ast.Load(), lineno=node.lineno, col_offset=node.col_offset
+            ),
             args=[node],
             keywords=[],
             lineno=node.lineno,
@@ -443,7 +445,14 @@ class _TransformListValues(ast.NodeTransformer):
         )
 
         file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
-        _node.keywords.append(ast.keyword(arg=FILE_LOCATION_ARGUMENT_NAME, value=file_location, lineno=node.lineno,  col_offset=node.col_offset))
+        _node.keywords.append(
+            ast.keyword(
+                arg=FILE_LOCATION_ARGUMENT_NAME,
+                value=file_location,
+                lineno=node.lineno,
+                col_offset=node.col_offset
+            )
+        )
 
         #for child in ast.iter_child_nodes(node):
         #    self.visit(child)
@@ -520,16 +529,13 @@ class PythonScriptFile:
             raise PythonScriptError(e, location=location) from e
 
         except (IndexError, NameError) as e:
-            LOGGER.exception(e)
+            #LOGGER.exception(e)
             exc_type, exc_message, exc_traceback = sys.exc_info()
             # COMPAT: PYTHON 3.5+
             tb1 = traceback.TracebackException.from_exception(e)
             last = tb1.stack[-1]
             l = FileLocation(last.lineno, 0, self.path)
             raise PythonScriptError(e, location=l) from e
-
-        except PythonScriptError as e:
-            raise e.with_path(self.path) from e
 
         except StopPythonScript as e:
             # python script exited

@@ -84,8 +84,6 @@ class UI:
         if self.verbosity == 0:
             return None
 
-        #verbose = verbose or self.verbosity
-
         if verbose > self.verbosity:
             return None
 

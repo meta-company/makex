@@ -1,3 +1,4 @@
+import hashlib
 from abc import (
     ABC,
     abstractmethod,
@@ -38,6 +39,8 @@ class TargetBase(ABC):
 
 
 class Runnable(Protocol):
+    location: FileLocation
+
     def __call__(self, ctx: Context, target: "EvaluatedTarget") -> CommandOutput:
         # old runnable function
         ...
@@ -55,13 +58,18 @@ class Runnable(Protocol):
 
 class InternalRunnable:
     """
-    Keep an Internal runnable that records the arguments evaluated from a runnable so we can hash the runnable before running it.
+    Keep an Internal runnable that records the arguments evaluated from a runnable,
+    so we can hash the runnable before running it.
 
     Keep a pointer to the original runnable as it's unnecessary to copy it.
     """
     def __init__(self, runnable: Runnable, arguments: dict[str, Any]):
         self.runnable = runnable
         self.arguments = arguments
+
+    @property
+    def location(self):
+        return self.runnable.location
 
     def hash(self, ctx: Context, hash_function: StringHashFunction):
         assert hasattr(self.runnable, "hash")
@@ -78,9 +86,6 @@ class InternalRunnable:
 
     def __repr__(self):
         return f"InternalRunnable({self.runnable!r}, {self.arguments})"
-
-
-import hashlib
 
 
 class Hasher:
@@ -107,7 +112,7 @@ class EvaluatedTarget(TargetBase):
 
     All the properties/attributes in this type are resolved.
 
-    Paths are resolve to absolute. TODO: They should retain their FileLocation for debug/ui.
+    Paths are resolved to absolute. TODO: They should retain their FileLocation for debug/ui.
 
     """
     name: str
@@ -132,7 +137,7 @@ class EvaluatedTarget(TargetBase):
 
     makex_file: MakexFileProtocol = None
 
-    cache_path:Path = None
+    cache_path: Path = None
 
     @property
     def makex_file_path(self) -> str:
@@ -169,12 +174,13 @@ class EvaluatedTarget(TargetBase):
 
         data = [
             f"key:{hash_function(self.key())}",
-            f"makex-file-path:{hash_function(self.makex_file_path)}", # TODO: checksums of makex file/etc
-            f"source:{hash_function(self.input_path.as_posix())}", # TODO: checksums of makex file/etc
-            f"path:{hash_function(self.path.as_posix())}", # TODO: checksums of makex file/etc
+            f"makex-file-path:{hash_function(self.makex_file_path)}",
+            f"source:{hash_function(self.input_path.as_posix())}",
+            f"path:{hash_function(self.path.as_posix())}",
         ]
 
         if self.makex_file:
+            # Add the checksums of the makex file and any used environment variables.
             data.append(f"makex-file:{self.makex_file.checksum}")
 
             if self.makex_file.enviroment_hash:
@@ -206,7 +212,7 @@ class EvaluatedTarget(TargetBase):
                 data.append(f"require:{requirement_hash}")
 
         if self.inputs:
-            # XXX: Inputs lists can be large (find()/glob()); optimize by updating the hash
+            # XXX: Inputs lists can be large (find()/glob()); optimize by using Hasher.update into one value.
             h = Hasher()
             for input in self.inputs:
                 #data.append(f"input-file:{str(input.checksum)}")
@@ -285,10 +291,12 @@ class EvaluatedTargetGraph:
 
                 seen.add(key)
 
-    def get_affected(self,
-                     paths: Iterable[Path],
-                     scope: Path = None,
-                     depth=0) -> Iterable[EvaluatedTarget]:
+    def get_affected(
+        self,
+        paths: Iterable[Path],
+        scope: Path = None,
+        depth=0,
+    ) -> Iterable[EvaluatedTarget]:
         """
         Return targets affected by the input files.
 

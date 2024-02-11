@@ -35,6 +35,7 @@ from typing import (
     Protocol,
     TypedDict,
     Union,
+    Mapping,
 )
 
 from makex._logging import (
@@ -438,7 +439,7 @@ class FindFiles:
 
 
 # TODO: handle bytes
-PathLikeTypes = Union[StringValue, PathElement]
+PathLikeTypes = Union[StringValue, PathElement, PathObject]
 MultiplePathLike = Union[Glob, FindFiles]
 AllPathLike = Union[Glob, FindFiles, StringValue, PathElement]
 
@@ -533,6 +534,8 @@ def _resolve_executable_name(ctx: Context, target, base: Path, name, value: Stri
     elif isinstance(value, PathElement):
         _path = resolve_path_element_workspace(ctx, target.workspace, value, base)
         return _path
+    elif isinstance(value, PathObject):
+        return value.path
     else:
         raise NotImplementedError(f"{type(value)} {value!r}")
 
@@ -663,7 +666,7 @@ class RunnableElementProtocol(Protocol):
 
 
 class InternalRunnableBase(ABC):
-    location: FileLocation
+    location: FileLocation = None
 
     @abstractmethod
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> ArgumentData:
@@ -805,14 +808,10 @@ class ShellCommand(InternalRunnableBase):
         string = arguments.get("string")
         preamble = arguments.get("preamble")
 
-        #def __call__(self, ctx: Context, target: EvaluatedTarget):
         if not string:
             return CommandOutput(0)
 
         s_print = "\n".join([f"# {s}" for s in chain(preamble.split("\n"), self.string)])
-
-        # TODO: we may want to change this to &&
-        #s = " && ".join(self.string)
 
         _script = ["\n"]
         _script.append(preamble)
@@ -862,6 +861,9 @@ class ShellCommand(InternalRunnableBase):
                 color_error=ctx.colors.WARNING,
                 color_escape=ctx.colors.RESET,
             )
+            # XXX: set the location so we see what fails
+            # TODO: Set the FileLocation of the specific shell line that fails
+            output.location = self.location
             return output
         except Exception as e:
             raise ExecutionError(e, target, location=self.location) from e
@@ -1187,8 +1189,7 @@ class Synchronize(InternalRunnableBase):
                     f"Missing source/input file {source} in sync()", target, location=self.location
                 )
             if source.is_dir():
-                # fix up destination to have relat
-                #rel_path = source.relative_to(target.input_path)
+                # Fix up destination; source relative should match destination relative.
                 if source.is_relative_to(target.input_path):
                     _destination = destination / source.relative_to(target.input_path)
                     if ctx.dry_run is False:
@@ -1229,9 +1230,6 @@ class Print(InternalRunnableBase):
         self.location = location
 
     def run_with_arguments(self, ctx: Context, target: EvaluatedTarget, arguments) -> CommandOutput:
-        pass
-
-        #def __call__(self, ctx: Context, target: EvaluatedTarget) -> CommandOutput:
         for message in self.messages:
             print(message)
 
@@ -1277,6 +1275,9 @@ class Write(InternalRunnableBase):
     def run_with_arguments(self, ctx: Context, target: EvaluatedTarget, arguments) -> CommandOutput:
         path = arguments.get("path")
         data = arguments.get("data")
+
+        ctx.ui.print(f"Writing {path}")
+
         if data is None:
             debug("Touching file at %s", path)
             if ctx.dry_run is False:
@@ -1384,9 +1385,6 @@ class ResolvedTargetReference:
 
     def __hash__(self):
         return hash(self.key())
-
-
-CommandTypes = Union[Execute, ShellCommand, InternalRunnableBase]
 
 
 class TargetObject:
@@ -1503,7 +1501,7 @@ class TargetObject:
         return f"TargetObject(\"{self.name}\")"
 
 
-def resolve_target_output_path(ctx, target: TargetObject, create=False):
+def resolve_target_output_path(ctx, target: TargetObject):
     # return link (or direct) and cache path.
     target_input_path = target.path_input()
 
@@ -1547,7 +1545,6 @@ def resolve_target_output_path(ctx, target: TargetObject, create=False):
         real_path = target_output_path
     elif isinstance(target.path, StringValue):
         # path to a simple file within the output.
-
         #target_output_path = Path(target.path.value)
         #if not target_output_path.is_absolute():
         #    target_output_path = target_input_path / target_output_path
@@ -1616,7 +1613,7 @@ class TargetGraph:
         # map from all the files inputting into TargetObject
         self._files_to_target: dict[PathLike, set[TargetObject]] = {}
 
-        # map from Target to all the things it provides to
+        # map from TargetKey to all the things it provides to
         self._provides_to: dict[TargetKey, set[TargetObject]] = {}
 
     def __contains__(self, item: ResolvedTargetReference):
@@ -1669,16 +1666,14 @@ class TargetGraph:
                 self._provides_to.setdefault(require.key(), set()).add(target)
                 # add to requires map
                 #requirements.append(require)
-
                 # TODO: this is for tests only. should yield a ResolvedTargetReference
-
                 yield require
             elif isinstance(require, TargetReferenceElement):
                 # reference to a target, either internal or outside the makex file
                 name = require.name.value
                 path = require.path
 
-                trace("reference input is %r: %r", require, path)
+                #trace("reference input is %r: %r", require, path)
 
                 location = require.location
                 if isinstance(path, StringValue):
@@ -1724,7 +1719,7 @@ class TargetGraph:
                 else:
                     file = _path
 
-                trace("Got reference %r %r", name, file)
+                #trace("Got reference %r %r", name, file)
                 #requirements.append(ResolvedTargetReference(name, path))
                 yield ResolvedTargetReference(name, file, location=location)
             elif isinstance(require, (FindFiles, Glob)):
@@ -2015,16 +2010,20 @@ class MakefileScriptEnv(ScriptEnvironment):
             pass
         else:
             raise PythonScriptError(
-                f"Invalid path type in find() function: {type(path)} ({path}). Path or string expected."
+                f"Invalid path type in find() function: {type(path)} ({path}). Path or string expected.",
+                location
             )
         return FindFiles(expr, path, location=location)
 
     def _function_environment(
         self,
-        dict: [StringValue, Union[PathLikeTypes, StringValue]],
-        location: FileLocation = None
+        dictionary: Mapping[StringValue, Union[PathLikeTypes, StringValue]] = None,
+        location: FileLocation = None,
+        **kwargs: Union[PathLikeTypes, StringValue],
     ):
-        return SetEnvironment(dict, location=location)
+        dictionary = dictionary or {}
+        dictionary.update(**kwargs)
+        return SetEnvironment(dictionary, location=location)
 
     def _function_Target(self, name, path: PathLikeTypes = None, location=None, **kwargs):
         # absorb kwargs so we can error between Target and target
@@ -2044,7 +2043,7 @@ class MakefileScriptEnv(ScriptEnvironment):
         elif path is None:
             _path = self.directory
         else:
-            raise PythonScriptError(f"Invalid path value:{type(path)}")
+            raise PythonScriptError(f"Invalid path value:{type(path)}", location)
 
         return create_build_path_object(
             self.ctx, target=name, path=_path, variants=variants, location=location
@@ -2082,9 +2081,13 @@ class MakefileScriptEnv(ScriptEnvironment):
 
         trace("Creating path: %s", path)
         #_path = resolve_path_parts(parts, self.directory, location)
-        _path = resolve_path_parts_workspace(
-            self.ctx, self.workspace, path, self.directory, location
-        )
+
+        if True:
+            _path = None
+        else:
+            _path = resolve_path_parts_workspace(
+                self.ctx, self.workspace, path, self.directory, location
+            )
 
         return PathElement(*path, resolved=_path, location=location)
 
@@ -2165,7 +2168,7 @@ class MakefileScriptEnv(ScriptEnvironment):
         location,
     ) -> Iterable[Union[TargetReferenceElement, PathElement, Glob]]:
         # process the requires= list of the target() function.
-        # convert to targetreferences where approriate
+        # convert to TargetReference where appropriate
         for require in requirements:
             if isinstance(require, StringValue):
                 if require.value.find(":") >= 0:
@@ -2541,8 +2544,10 @@ def parse_makefile_into_graph(
 
         e = makefile.exception()
         if e:
-            logging.error("Makefile had an error %s %r", e, e)
-            logging.exception(e)
+            if not isinstance(e, (ExecutionError, PythonScriptError)):
+                logging.error("Makefile had an error %s %r", e, e)
+                logging.exception(e)
+
             errors.append(e)
 
             mark_path_finished(makefile_path)
@@ -2661,7 +2666,7 @@ def parse_makefile_into_graph(
                         workspace=workspace_of_makefile,
                     )
                     # We must use a lambda passing the path because if we have
-                    # an Exception we won't know which file caused it.
+                    #  an Exception we won't know which file caused it.
                     f.add_done_callback(lambda future, p=path: finished(p, future))
 
                     executing.append(path)

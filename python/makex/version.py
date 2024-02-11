@@ -1,1 +1,1 @@
-VERSION = "20240101"
+VERSION = "development"

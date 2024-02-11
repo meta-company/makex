@@ -42,7 +42,7 @@ atexit.register(_kill_sub)
 
 
 def run(
-    command,
+    command: list[str],
     env: dict[str, str],
     capture: bool = False,
     shell: bool = False,
@@ -65,9 +65,6 @@ def run(
     :param cwd: Path to change to before running
     :return:
     """
-
-    #if isinstance(command,str):
-    #    command = shlex.split(command)
 
     #check_exec(Path(command[0]))
 

@@ -11,13 +11,13 @@ from typing import (
     Pattern,
 )
 
-import reflink
 from makex.colors import (
     ColorsNames,
     NoColors,
 )
 from makex.configuration import Configuration
 from makex.constants import (
+    BUILT_IN_REFLINKS,
     DEFAULT_IGNORE_PATTERN,
     MAKEX_FILE_NAMES,
     OUTPUT_DIRECTORY_NAME,
@@ -36,6 +36,10 @@ from makex.workspace import (
     WorkspaceCache,
 )
 
+if BUILT_IN_REFLINKS:
+    import makex.reflink as reflink
+else:
+    import reflink
 
 @dataclass
 class Context:

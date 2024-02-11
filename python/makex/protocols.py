@@ -15,12 +15,13 @@ class RunArguments:
     configuration: None
 
 
-@dataclass(frozen=True)
+@dataclass
 class CommandOutput:
     status: int
     output: str = None
     error: str = None
     hash: str = None
+    location: FileLocation = None
 
 
 class CommandProtocol(Protocol):

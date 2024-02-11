@@ -54,6 +54,8 @@ magic marker to see if they are a Makex file and the first Makex-looking file wi
 
 A marker `#!makex` at the top of the file both serves to mark the file as a script and to differentiate makex files from other types of files.
 
+At the moment, this marker is entirely optional.
+
 ```python
 #!makex
 ```
@@ -246,19 +248,19 @@ Each target can accept a list of "Runnables". These are a list of things that wi
 ```{eval-rst}
 .. py:function:: copy(paths, destination=None, /)
   
-  Copy `paths` to the specified destination `destination`.
-  Paths may be a list of paths or a single path.
+  Copy `paths` (files or folders) to the Target's output directory, or the specified directory `destination`.
+  `paths` may be a list of paths or a single path.
   
-  If not specified, `destination` is the Target's output directory. If `destination` is a relative path, it will be resolved
-  relative to the Target's output path; this may be used to prefix items in the output.
+  If `destination` is a relative path, it will be resolved relative to the Target's output path; this may be used to prefix items in the output.
   Any directories specified in `destination` (by using a directory seperator) will be created before copying.
   
-  If inputs is a list, the destination path must be a directory.
+  .. If inputs is a list, the destination path must be a directory.
+  
+  If the destination is empty, the specified `paths` will be copied directly into the Target's output path.
+  
+  If the destination doesn't exist, it will be created.
+  
   An Execution error will be raised if the destination exists, and it is not a directory.
-  
-  If the destination is empty, the specified `paths` (files or directories) will be copied directly into the Target's output path.
-  
-  If the destination is a directory, and it doesn't exist, it will be created.
   
   :param Union[PathLike,list[PathLike]] paths: Paths to the file(s) or folder(s) to copy. Relative paths are resolved relative to the makex file.
   
@@ -302,7 +304,7 @@ Each target can accept a list of "Runnables". These are a list of things that wi
   
   Writes `data` to `file`.
   
-  :param PathLike file: The destination file. May be a Workspace path, an absolute path, or relative path within the target path.
+  :param PathLike file: The destination file. May be a Workspace path, an absolute path, or relative path within the Target's output path.
   :param Union[str,list[str]] data: The data to write, may be a list of strings which will be concatenated.
   :param bool executable: Ensure the file is executable.
 ```

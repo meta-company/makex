@@ -12,13 +12,36 @@ from typing import (
     Tuple,
 )
 
-import xattr
+# True to use builtin python xattr functions instead of xattr pypi package
+BUILTIN_XATTR = True
+
+if BUILTIN_XATTR:
+
+    def get_xattr(path, attribute):
+        return os.getxattr(path, attribute)
+
+    def set_xattr(path, attribute, value):
+        return os.setxattr(path, attribute, value)
+
+    def remove_xattr(path, attribute):
+        return os.removexattr(path, attribute)
+
+else:
+    import xattr
+
+    def get_xattr(path, attribute):
+        return xattr.getxattr(path, attribute)
+
+    def set_xattr(path, attribute, value):
+        return xattr.setxattr(path, attribute, value=value)
+
+    def remove_xattr(path, attribute):
+        return xattr.removexattr(path, attribute)
+
 
 INODE_IN_FINGERPRINT = False
 
 # must be prefixed with user. otherwise we will get OSError, Operation not supported
-#from xattr import getxattr
-
 TEST_KEY = b"user.test"
 TEST_VALUE = b"test"
 
@@ -63,7 +86,7 @@ class FileChecksum:
         SHA256 = "sha256"
         MD5 = "md5"
 
-    def __init__(self, type:Type, value, fingerprint: str = None):
+    def __init__(self, type: Type, value, fingerprint: str = None):
         self.type = type
         self.value = value
         self.fingerprint = fingerprint
@@ -111,19 +134,6 @@ class FileChecksum:
         :return:
         """
         csum, csum_fingerprint, fingerprint = get_attributes(path, type)
-        x = xattr.xattr(path.as_posix())
-
-        #csum = None
-        #csum_fingerprint = None
-
-        #csum, csum_fingerprint = get_xattr(path, type)
-
-        #try:
-        #    csum = x.get(f"user.checksum.{type.value}").decode("ascii")
-        #    csum_fingerprint = x.get(f"user.checksum.{type.value}.fingerprint").decode("ascii")
-        #except IOError:
-        #    # xattr raises exceptions if the file doesn't have the properties
-        #    pass
 
         if csum and csum_fingerprint:
             if fingerprint == csum_fingerprint:
@@ -143,13 +153,11 @@ class FileChecksum:
             LOGGER.debug(f"Updating file mode {new_mode}: %s", path)
             os.chmod(path, new_mode)
 
-        x.set(f"user.checksum.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
-        #x.set(f"user.checksum.{type}.time", str(t).encode("ascii"))
-        #x.set(f"user.checksum.{type.value}.fingerprint", fingerprint.encode("ascii"))
+        set_xattr(path, f"user.checksum.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
         return cls(type, d, fingerprint)
 
     @classmethod
-    def make(cls, path: Path, fingerprint:str, type: Type = Type.SHA256) -> "FileChecksum":
+    def make(cls, path: Path, fingerprint: str, type: Type = Type.SHA256) -> "FileChecksum":
         d = get_digest(path)
         return cls(type, d, fingerprint)
 
@@ -176,7 +184,7 @@ class FileChecksum:
 
         assert path.exists(), f"Missing path {path}"
 
-        csum, csum_fingerprint = get_xattr(path, type)
+        csum, csum_fingerprint = get_filechecksum_xattr(path, type)
 
         if not csum or not csum_fingerprint or not fingerprint:
             # can't verify files with no stored checksum/time.
@@ -188,8 +196,6 @@ class FileChecksum:
                 "differeing fingerprint %s: %s != %s", path, fingerprint, csum_fingerprint
             )
             # file was modified since its checksum time
-            #modtime = path.stat().st_mtime
-            #if modtime > csumtime:
             return False
 
         d = get_digest(path)
@@ -197,7 +203,7 @@ class FileChecksum:
         if csum == d:
             return True
 
-        logging.debug("Difering csum %s: %s != %s", path, csum, d)
+        logging.debug("Differing csum %s: %s != %s", path, csum, d)
         return False
 
     @staticmethod
@@ -214,7 +220,7 @@ class FileChecksum:
         if fingerprint is None:
             return False
 
-        csum, csum_fingerprint = get_xattr(path, type)
+        csum, csum_fingerprint = get_filechecksum_xattr(path, type)
 
         if csum_fingerprint is None:
             return False
@@ -227,18 +233,17 @@ class FileChecksum:
         # Force the refresh of a stored fingerprint of path.
         # when INODE_IN_FINGERPRINT is enabled, Must be used when copying otherwise checksums of copied files will be invalid.
         # inodes (may/likely) change when files are copied, no matter copy on write.
-        csum, csum_fingerprint = get_xattr(path, type)
+        csum, csum_fingerprint = get_filechecksum_xattr(path, type)
 
         if csum is None:
             return False
 
         fingerprint = get_fingerprint(path)
-        x = xattr.xattr(path.as_posix())
-        x.set(f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii"))
+        set_xattr(path, f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii"))
         return True
 
     @classmethod
-    def compare(cls, a, b):
+    def compare(cls, a, b, type: Type = Type.SHA256):
         """
         Compare the xattrs of a and b and
 
@@ -247,8 +252,8 @@ class FileChecksum:
         :return:
         """
         # Return true if one checksum is equal to another
-        asum = get_attributes(a)
-        bsum = get_attributes(b)
+        asum = get_attributes(a, type)
+        bsum = get_attributes(b, type)
         return asum == bsum
 
     @staticmethod
@@ -271,10 +276,10 @@ class FileChecksum:
         with NamedTemporaryFile("w+b", dir=path) as f:
             try:
                 fname = f.name.encode("utf-8")
-                xattr.setxattr(fname, TEST_KEY, TEST_VALUE)
+                set_xattr(fname, TEST_KEY, TEST_VALUE)
 
-                if xattr.getxattr(fname, TEST_KEY) == TEST_VALUE:
-                    xattr.removexattr(fname, TEST_KEY)
+                if get_xattr(fname, TEST_KEY) == TEST_VALUE:
+                    remove_xattr(fname, TEST_KEY)
                     result = True
             except IOError as e:
 
@@ -289,18 +294,18 @@ class FileChecksum:
     @staticmethod
     def copy(source: Path, destination: Path, type: Type = Type.SHA256):
         try:
-            csum, fingerprint = get_xattr(source, type)
+            csum, fingerprint = get_filechecksum_xattr(source, type)
         except IOError as e:
             return False
-
-        x = xattr.xattr(destination.as_posix())
 
         if INODE_IN_FINGERPRINT:
             # regenerate a fingerprint when copying with inodes in the fingerprint
             # inodes (may/likely) change when files are copied, no matter copy on write.
             fingerprint = get_fingerprint(destination).encode("ascii")
 
-        x.set(f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii"))
+        set_xattr(
+            destination, f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii")
+        )
 
     @staticmethod
     def fingerprint(path: Path, type: Type = Type.SHA256):
@@ -313,13 +318,10 @@ def copy_with_checksum(source, destination):
     FileChecksum.copy(source, destination)
 
 
-def get_xattr(path: Path, type: FileChecksum.Type) -> tuple[str, str]:
+def get_filechecksum_xattr(path: Path, type: FileChecksum.Type) -> tuple[str, str]:
     assert isinstance(type, FileChecksum.Type)
-    #logging.debug("Chek sadad %s", type.value)
-
-    x = xattr.xattr(path.as_posix())
     try:
-        csum = x.get(f"user.checksum.{type.value}").decode("ascii")
+        csum = get_xattr(path, f"user.checksum.{type.value}").decode("ascii")
         csum, csum_fingerprint = csum.split(":")
 
     except ValueError:
@@ -347,26 +349,23 @@ def get_fingerprint(path: Path) -> Optional[str]:
     return f"{modified_time}_{stat.st_size}"
 
 
-def get_attributes(path,
-                   type: FileChecksum.Type) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def get_attributes(
+    path,
+    type: FileChecksum.Type,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     # check if still valid
 
     fingerprint = get_fingerprint(path)
-    x = xattr.xattr(path.as_posix())
-
     csum = None
     csum_fingerpint = None
 
     try:
-        csum = x.get(f"user.checksum.{type.value}").decode("ascii")
+        csum = get_xattr(path, f"user.checksum.{type.value}").decode("ascii")
         csum, csum_fingerpint = csum.split(":")#x.get(f"user.checksum.{type.value}.fingerprint").decode("ascii")
     except ValueError:
         return None, None, None
     except IOError:
         # xattr raises exceptions if the file doesn't have the properties
         pass
-
-    #if fingerprint != csum_fingerpint:
-    #    return None, None, fingerprint
 
     return csum, csum_fingerpint, fingerprint

@@ -1,3 +1,4 @@
+import errno
 import logging
 import os
 from enum import Enum
@@ -7,16 +8,23 @@ from shutil import copy2
 from typing import (
     Iterable,
     Pattern,
-    cast,
     Union,
+    cast,
 )
 
-REFLINK_PACKAGE_DETECTED = True
+from makex.constants import BUILT_IN_REFLINKS
 
-try:
-    from reflink import reflink
-except ImportError:
-    REFLINK_PACKAGE_DETECTED = False
+REFLINKS_ENABLED = False
+
+if BUILT_IN_REFLINKS:
+    from makex.reflink import reflink
+    REFLINKS_ENABLED = True
+else:
+    try:
+        from reflink import reflink
+        REFLINKS_ENABLED = True
+    except ImportError:
+        REFLINKS_ENABLED = False
 
 
 def same_fs(file1, file2):
@@ -41,7 +49,7 @@ def find_files(
 ) -> Iterable[Path]:
     """
     Find files. Use os.scandir for performance.
-    # TODO: scandir may return bytes: https://docs.python.org/3/library/os.html#os.scandir
+
     :param path:
     :param pattern:
     :param ignore_pattern:
@@ -56,6 +64,7 @@ def find_files(
     _ignore_match = ignore_pattern.match
     _pattern_match = pattern.match if pattern else None
 
+    # TODO: scandir may return bytes: https://docs.python.org/3/library/os.html#os.scandir
     for entry in os.scandir(path):
         entry = cast(DirEntry, entry)
         name = entry.name
@@ -95,29 +104,24 @@ def safe_reflink(src, dest):
     # IOError: [Errno 2] No such file or directory
     #a = os.stat(src)
     #b = os.stat(dest)
-
     #if a.st_ino == b.st_ino:
-    #    # same file. don't reflink otherwise we'll get:
     #    return
 
     try:
         reflink(src, dest)
-    except IOError as e:
+    except IOError as reflink_error:
         # Fall back to old [reliable] copy function if we get an EINVAL error.
-        if str(e).startswith("EINVAL"):
-            logging.warning("Error with reflinks. Falling back to using copy.", exc_info=e)
+        if reflink_error.errno == errno.EINVAL:
+            logging.warning(
+                "Error with reflinks. Falling back to using copy.", exc_info=reflink_error
+            )
             try:
                 copy2(src, dest)
             except OSError as copy_error:
                 raise copy_error
         else:
-            raise e
-    except Exception as e:
-        logging.error("Reflink implementation had an unknown error: %s", e)
-        logging.exception(e)
-        raise e
-
-    #try:
-    #    reflink(src, dest)
-    #except OSError as e:
-    #    raise Exception(f"Error making reflink to {dest} from {src}: {e}")
+            raise reflink_error
+    except Exception as reflink_error:
+        logging.error("Reflink implementation had an unknown error: %s", reflink_error)
+        logging.exception(reflink_error)
+        raise reflink_error

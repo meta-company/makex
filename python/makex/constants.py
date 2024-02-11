@@ -112,3 +112,5 @@ else:
     # precompile the pattern for reduced start up time.
     DEFAULT_IGNORE_PATTERN = '^(?=(?s:.*(\.pyc))\Z|(?s:.*(_output_|.pytest_cache|.hg|.venv|.git|__pycache__))\Z)'
 
+# True to use builtin reflinks instead of reflinks pypi package
+BUILT_IN_REFLINKS = True

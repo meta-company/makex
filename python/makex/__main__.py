@@ -45,7 +45,6 @@ from makex.errors import (
     CacheError,
     ExecutionError,
     GenericSyntaxError,
-    MultipleErrors,
 )
 from makex.executor import Executor
 from makex.flags import VARIANTS_ENABLED
@@ -80,30 +79,6 @@ COMPLETE_TARGET = {
     "bash": "_shtab_makex_compgen_paths",
     "zsh": "_shtab_makex_complete_target",
 }
-
-# yapf: disable
-PREAMBLE = {
-    "bash": r"""
-# $1=COMP_WORDS[1]
-_shtab_makex_compgen_paths() {
-    makex complete ${1}
-}
-""",
-    "zsh": r"""
-_shtab_makex_complete_target(){
-  local -a plugins
-  local lastword=${PREFIX}
-  local plugins=($(makex complete "$lastword"))
-  #_describe 'targets' plugins
-  #_multi_parts -i "\n" plugins
-  compadd -a - plugins
-  #  -M 'r:|=*'
-  #makex complete "$curcontext"
-}   
-""",
-    "tcsh": "",
-}
-# yapf: enable
 
 
 class GlobalArgs:
@@ -588,15 +563,11 @@ def print_errors(ctx: Context, errors):
 def print_error(ctx: Context, error):
     if isinstance(error, (PythonScriptFileError, PythonScriptError)):
         print(pretty_makex_file_exception(error, error.location, colors=ctx.colors))
-        #print(error.pretty())
-    #if isinstance(error, (PythonScriptError)):
-    #    print(error.pretty())
     elif isinstance(error, MakexFileCycleError):
         print(error.pretty(ctx))
     elif isinstance(error, ExecutionError):
         if error.location:
             print(pretty_makex_file_exception(error.error, error.location, colors=ctx.colors))
-            #print(pretty_exception(error.error, error.location, color=True))
         else:
             print("Execution Error:", error)
     else:
@@ -832,8 +803,8 @@ def main_affected(args: AffectedArgs, extra_args):
     # find all the makexfile under path
     # add them all to the graph
 
-    # for the specified targets, return the reverse depedencies
-    # eg. we change a project, we want to query all dependendants and their dependancts to rebuild them
+    # for the specified targets, return the reverse dependencies
+    # eg. we change a project, we want to query all dependents and their dependents to rebuild them
 
     scopes = [parse_scope(scope) for scope in args.scope or []]
 
@@ -929,7 +900,7 @@ def main_get_outputs(args):
 
 
 def main_targets(args, extra_args):
-    # Fast function to print targets of specfied directory or makex file.
+    # Fast function to print targets of specified directory or makex file.
     cwd = Path.cwd()
 
     #if args.directory:
@@ -1022,8 +993,14 @@ def main_workspace(args, extra_args):
 
 
 def main_complete(args, extra_args):
-    # Fast function to print targets.
-    # XXX: this is used in bash completions and should return early.
+    """
+    Complete the specified argument (path/target/etc).
+
+    :param args:
+    :param extra_args:
+    :return:
+    """
+    # XXX: this is used in bash completions and should return fast/early.
     cwd = Path.cwd()
 
     #if args.directory:
@@ -1217,7 +1194,7 @@ def main_completions(args, extra_args):
         file.parent.mkdir(parents=True, exist_ok=True)
         output = file.open("w")
 
-    if not HAS_SHTAB:
+    if HAS_SHTAB is False:
         COMPLETIONS_PACKAGE = "makex.data.completions"
         resource_name = f"makex.{args.shell}"
         # load static completions from data directory
@@ -1229,12 +1206,10 @@ def main_completions(args, extra_args):
         print(importlib.resources.read_text(COMPLETIONS_PACKAGE, resource_name), file=output)
         sys.exit(-1)
     else:
-        from makex._shtab import complete_bash
+        from makex._shtab import PREAMBLE
         shell = args.shell
         _parser = parser(documentation=False)
         script = shtab.complete(_parser, shell=shell, preamble=PREAMBLE)
-        #ui.write(script, force=True)
-
         print(script, file=output)
 
     return 0
@@ -1286,8 +1261,9 @@ def main_run(args, extra_args):
     for target in targets:
         t = graph.get_target(target)
         if t is None:
-            print(
-                f"{ctx.colors.ERROR+ctx.colors.BOLD}Error:{ctx.colors.RESET} Target \"{ctx.colors.BOLD+target.name+ctx.colors.RESET}\" not in found in {target.path} {target}"
+            ctx.ui.print(
+                f"Target \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not in found in {target.path} {target}",
+                error=True
             )
             sys.exit(-1)
 
@@ -1375,12 +1351,6 @@ def main():
 
     try:
         COMMANDS[args.command.replace("-", "_")](args, extra_args)
-    except PythonScriptError:
-        pass
-    except MultipleErrors:
-        pass
-    except ExecutionError:
-        pass
     finally:
         if args.profile:
             if args.profile_mode == "cprofile":

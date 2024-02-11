@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "makex"
-version = "20240201"
+dynamic = ["version"]
 description = "Build tool"
-readme = "README.md"
-license = {file = "LICENSE.md"}
+readme = { file = "README.md", content-type="text/markdown" }
+license = { file = "LICENSE.md", content-type="text/markdown" }
 requires-python = ">=3.9"
 dependencies = [
-    "reflink>=0.2.2",
-    "xattr>=1.0.0",
+    # XXX: We don't need this anymore but we can fall back if ours doesn't work.
+    #"reflink>=0.2.2",
+    # XXX: We don't need this anymore but we can fall back. This xattr package doesn't emit auditing events unlike the builtin.
+    #"xattr>=1.0.0",
     "toml>=0.10.2",
     "progressbar2>=4.3.2",
 ]
@@ -19,6 +21,9 @@ authors = [
     {name = "Nate Skulic"},
     {name = "MetaCompany" },
 ]
+
+[tool.setuptools.dynamic]
+version = { attr = "makex.version.VERSION" }
 
 [project.optional-dependencies]
 test = [
@@ -53,3 +58,8 @@ log_cli = true
 log_cli_level = "5"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+addopts = [
+    "--import-mode=importlib",
+]
+pythonpath = "."
+

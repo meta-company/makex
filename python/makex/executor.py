@@ -270,7 +270,7 @@ class Executor:
 
                 #target = self.waiting.pop(0)
                 target = self.waiting.popleft()
-                debug("pop waiting %s: %s", target, target.key())
+                debug("Pop waiting %s: %s", target, target.key())
 
                 if target.key() in self.queued:
                     # Target has been already queued for execution. Wait until it is done.
@@ -341,6 +341,9 @@ class Executor:
         #    for target in self.finished:
         #        self._store_database(target)
 
+        # XXX: We must call this here to flush any queued to the database before we execute again.
+        self._write_queued_to_database()
+
         return self.finished, self.errors
 
     def _checksum_file(self, path: Path) -> FileChecksum:
@@ -371,7 +374,6 @@ class Executor:
         return checksum
 
     def _is_checksum_stale(self, path, checksum: FileChecksum = None):
-
         if False:
             status = self.metadata.get_file_status(path)
             if status.checksum == checksum:
@@ -404,20 +406,26 @@ class Executor:
         if linkpath.exists():
             if not linkpath.is_symlink():
                 raise Exception(
-                    f"Linkpath {linkpath} exists, but it is not a symlink. Output directory may have been created inadvertantly outside the tool."
+                    f"Linkpath {linkpath} exists, but it is not a symlink. "
+                    f"Output directory may have been created inadvertantly outside the tool."
                 )
 
             realpath = linkpath.readlink().absolute()
 
             if realpath != new_path:
-                raise Exception(
-                    f"Link {linkpath} exists, but it doesn't point to the right place in the cache ({new_path}). "
-                    f"The link currently points to {realpath}."
-                    f"Output directory may have been created inadvertantly outside Makex. "
-                    f" Delete or change this link."
-                )
+
+                if fix:
+                    linkpath.unlink()
+                    linkpath.symlink_to(new_path, target_is_directory=True)
+                else:
+                    raise Exception(
+                        f"Link {linkpath} exists, but it doesn't point to the right place in the cache ({new_path}). "
+                        f"The link currently points to {realpath}. "
+                        f"Output directory may have been created inadvertantly outside Makex. "
+                        f" Delete or change this link."
+                    )
         else:
-            if linkpath.exists() is False and linkpath.is_symlink():
+            if linkpath.is_symlink():
                 # we have a broken symlink
                 if fix:
                     # fix broken links automatically
@@ -433,6 +441,11 @@ class Executor:
                     raise Exception(
                         f"There's a broken link at {linkpath}. Delete or change this link."
                     )
+            #else:
+            #    raise ExecutionError(
+            #        f"Error creating symlink for target. File at {linkpath} is not a symbolic link.",
+            #        target,
+            #    )
 
             if not linkpath.parent.exists():
                 logging.debug("Creating parent of linked output directory: %s", linkpath.parent)
@@ -448,14 +461,6 @@ class Executor:
                 linkpath.is_symlink()
             )
             linkpath.symlink_to(new_path, target_is_directory=True)
-        #if not lpath.exists():
-        #    lpath.symlink_to(cache)
-        #else:
-        #    if not lpath.is_symlink():
-        #        raise ExecutionError(
-        #            f"Error creating symlink for target. File at {lpath} is not a symbolic link.",
-        #            target
-        #        )
 
     def _evaluate_target(self, target: TargetObject, destroy_output=False) -> EvaluatedTarget:
         # transform the target object into an evaluated object
@@ -502,11 +507,6 @@ class Executor:
                 for path in resolve_glob(
                     ctx, target, target_input_path, node, {ctx.output_folder_name}
                 ):
-                    #for path in find_files(
-                    #    target_input_path, pattern, ignore_names={ctx.output_folder_name}
-                    #):
-                    #path = Path(path)
-
                     checksum = self._checksum_file(path)
                     seen.add(path)
                     inputs.append(FileStatus(
@@ -521,7 +521,6 @@ class Executor:
                     )
                 else:
                     path = target_input_path
-                #pattern = node.pattern
 
                 # TODO: optimize find
                 i = 0
@@ -566,10 +565,6 @@ class Executor:
                     _path = resolve_string_path_workspace(
                         ctx, target.workspace, path, target_input_path
                     )
-                    #_path = Path(path.value)
-
-                    #if not _path.is_absolute():
-                    #    _path = target_input_path / _path
 
                     # find the makex file inside of path
                     makex_file = find_makex_files(_path, ctx.makex_file_names)
@@ -629,14 +624,11 @@ class Executor:
         unnamed_outputs = []
         output_dict: dict[Union[str, None], list[FileStatus]] = {None: unnamed_outputs}
 
-        cache_path = None
-
         # only create if we have runs (or somehow, just outputs)
-        #if target.commands or target.outputs:
-        target_output_path, cache_path = resolve_target_output_path(ctx, target=target, create=False)
+        target_output_path, cache_path = resolve_target_output_path(ctx, target=target)
 
         if target.outputs:
-            debug("Rewrite output path %r %r %s", target_output_path, target.path, target)
+            #debug("Rewrite output path %r %r %s", target_output_path, target.path, target)
 
             def _get_output_file_status(path: Path) -> FileStatus:
                 checksum = None
@@ -676,7 +668,7 @@ class Executor:
                                 error_string="Invalid output type {type(value)}: {value!r}",
                             )
                         path = _transform_output_to_path(target_output_path, value)
-                        trace("Eval outputs %r", path)
+                        trace("Check target output: %s", path)
                         status = _get_output_file_status(path)
                         if k is None:
                             unnamed_outputs.append(status)
@@ -698,7 +690,7 @@ class Executor:
                     )
                     #errors.append()
 
-        debug("Pre-eval requires %s", requires)
+        #debug("Pre-eval requires %s", requires)
         # Create a Evaluated target early, which we can pass to Runnables so they can easily create arguments (below).
         # XXX:
         runnables = []
@@ -729,12 +721,6 @@ class Executor:
                 return location
             else:
                 location = None
-
-            #if location is None and callable(obj):
-            #    # XXX: extract the location from the extras added with the python scripting ast
-            #    location = FileLocation(
-            #        getattr(obj, "_path_"), getattr(obj, "_line_"), getattr(obj, "_column_")
-            #    )
 
             if location is None: # or isinstance(obj, FileLocation) is False:
                 return default
@@ -911,10 +897,15 @@ class Executor:
         if self.stop.is_set():
             return None, None
 
-        # XXX: Make sure any targets that need to be written are.
-        # Otherwise, the Target might not be stored because of a long running Target/process (e.g. a development server target)
-        # we're just about to execute.
+        # XXX: Make sure any targets that need to be written are. Otherwise, the Target might not be stored because
+        #  of a long running Target/process (e.g. a development server target) we're just about to execute.
         self._write_queued_to_database()
+
+        if target.path:
+            if target.path.resolved:
+                delete_output = False
+        else:
+            delete_output = True
 
         debug(f"Begin evaluate target {target}...")
         # queue the requirements for execution if all dependencies are completed
@@ -926,8 +917,8 @@ class Executor:
             # XXX: target evaluation errors must stop all execution.
             #self.stop.set()
             return None, [e]
-        # TODO: have a future here; once complete, then enable the actual execution. evalutations may come out of order,
-        # TODO: so, we have to synchronize the evaluation order with the intended execution order
+        # TODO: have a future here; once complete, then enable the actual execution. evaluations may come out of order,
+        #  so, we have to synchronize the evaluation order with the intended execution order
         """
         
         queue = [a, b, c, d]  # required order of execution, as planned
@@ -981,7 +972,7 @@ class Executor:
         execute_list = [d, c, b, a]
         
         Execute list is ordered correctly, but it is not topographic, parallelized.
-        The execute_list/queue is procesed similarly; waiting for target dependants to finish before starting the target.
+        The execute_list/queue is processed similarly; waiting for target dependants to finish before starting the target.
         """
 
         #self.ctx.ui.print(f"Evaluated target: {target.key()}")
@@ -1005,7 +996,7 @@ class Executor:
 
         if self.force:
             # force the execution
-            self._queue_target_on_pool(evaluated, target_dirty)
+            self._queue_target_on_pool(evaluated, delete_output)
             return evaluated, None
 
         # dirty checking applicable
@@ -1014,14 +1005,14 @@ class Executor:
             #key = target.key()
             #if key in self.queued:
             #    self.queued.remove(key)
-            debug("Skipping target. Not dirty. %s", evaluated)
+            debug("Skipping target. Not dirty: %s", evaluated.key())
             return evaluated, None
 
         info("Target has been deemed dirty. Queueing for execution: %s", evaluated.key())
-        self._queue_target_on_pool(evaluated, target_dirty)
+        self._queue_target_on_pool(evaluated, delete_output)
         return evaluated, None
 
-    def _queue_target_on_pool(self, evaluated: EvaluatedTarget, target_dirty) -> None:
+    def _queue_target_on_pool(self, evaluated: EvaluatedTarget, delete_output) -> None:
         # TODO: we should get a future here.
         #  if there was an exception, stop everything, both execution and evaluation.
         #  if all the requirements have evaluated (or no requirements), execute.
@@ -1031,9 +1022,13 @@ class Executor:
         #   if none or only some of the deps have evaluated, keep it waiting
         #info(f"Queue target for execution {evaluated}")
 
-        if target_dirty and evaluated.cache_path.exists():
+        if delete_output and evaluated.cache_path.exists():
             if REMOVE_CACHE_DIRTY_TARGETS_ENABLED:
-                debug("Removing cache of %s (%s) because target is dirty.", evaluated.key(), evaluated.cache_path)
+                debug(
+                    "Removing cache of %s (%s) because target is dirty.",
+                    evaluated.key(),
+                    evaluated.cache_path
+                )
                 # remove the cache if the target is dirty
                 rmtree(evaluated.cache_path)
 
@@ -1130,8 +1125,7 @@ class Executor:
 
         exc = result.exception()
         if exc:
-            #logging.debug(exc)
-            if self.ctx.debug or not isinstance(exc, (ExecutionError, PythonScriptError)):
+            if self.ctx.debug or isinstance(exc, (ExecutionError, PythonScriptError)) is False:
                 # also show it here on debug mode because it'll get swallowed
                 # log unknown/unprintable
                 logging.exception(exc)
@@ -1150,7 +1144,6 @@ class Executor:
             if errors:
                 self.errors += errors
                 #self.stop.set()
-                #return
                 has_error = True
 
         if has_error:
@@ -1199,7 +1192,7 @@ class Executor:
 
                     if execution is None or execution.status is None:
                         message = f"Runnable {command!r} did not return a valid output. Got {type(execution)}"
-                        raise ExecutionError(message, target, target.location)
+                        raise ExecutionError(message, target, command.location or target.location)
 
                     if execution.status != 0:
                         # \n\n {execution.output} \n\n {execution.error}
@@ -1208,7 +1201,9 @@ class Executor:
                             f"{brief_target_name(context, target, color=True)}:{target.location.line} (exit={execution.status}) \n",
                             f"\tThe process had an error and returned non-zero status code ({execution.status}). See above for any error output."
                         ]
-                        raise ExecutionError("".join(string), target, target.location)
+                        raise ExecutionError(
+                            "".join(string), target, command.location or target.location
+                        )
 
                     if execution.output:
                         # XXX: not required as execution dumps stdout. we may want to capture

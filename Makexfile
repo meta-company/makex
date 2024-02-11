@@ -5,9 +5,8 @@ Note: This file must be run with the MAKEX_DEVELOPER environment variable to som
 """
 VENV = path("venv")
 
-# NOTE: You MUST update the version in pyproject.toml.
-# TODO: update the pyproject.toml automatically
-VERSION = "20240201"
+# NOTE: This must be updated on new release versions.
+VERSION = "20240203"
 
 target(
     name="hello-world",
@@ -29,15 +28,13 @@ target(
     ],
     runs=[
         # Set the environment for future runnables.
-        environment({
-            "BUILDDIR": path("documents-html"),
-            "LC_ALL": "C",
-            "RELEASE": VERSION,
-        }),
+        environment(
+            BUILDDIR=path("documents-html"),
+            LC_ALL="C",
+            RELEASE=VERSION,
+        ),
         shell(
             f"source {VENV}/bin/activate",
-            #f"export LC_ALL=C",
-            #f"export BUILDDIR={path('documents-html')}",
             f"make -e -C documents clean html",
         ),
         # all three of these are the same:
@@ -154,6 +151,8 @@ target(
     runs=[
         ## || exit 0 because mypy returns a non-zero which causes makex to report errors
         shell(
+            f"source {VENV}/bin/activate",
+            "pip install mypy",
             # --cache-dir= because we don't want to pollute the source with .mypy_cache directories
             # mypy returns a non-zero exit code so we have to use || exit 0
             f"mypy --cache-dir={path('mypy')} --follow-imports=silent --config-file python/mypy.ini --explicit-package-bases --show-absolute-path -p makex || exit 0",
@@ -178,4 +177,19 @@ target(
         )
     ]
     # makex completions --print bash > ~/.local/share/bash-completion/completions/makex
+)
+
+
+target(
+    name="test",
+    requires=[
+        ":venv"
+    ],
+    runs=[
+        shell(
+            f"source {VENV}/bin/activate",
+            f"pytest -o cache_dir={path('test')}/pytest python"
+        )
+
+    ]
 )

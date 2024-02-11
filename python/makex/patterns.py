@@ -82,7 +82,5 @@ def combine_patterns(patterns: list[str], flags=re.X | re.U | re.DOTALL) -> Patt
     for pattern in patterns:
         new_pattern.append(template.format(pattern=pattern))
 
-    #pattern = "".join(["("]+["|".join(new_pattern)]+[")"])
-    #print("Pattern", pattern)
     pattern = "|".join(new_pattern)
     return re.compile(pattern, flags=flags)

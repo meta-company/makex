@@ -30,6 +30,7 @@ def transaction(conn):
 
 class SqliteMetadataBackend:
     def __init__(self, path: Path):
+        debug("Connecting to sqlite database at %s", path)
         self.con = sqlite3.connect(path.as_posix())
         self.cur = self.con.cursor()
         # raise a database needs upgrade error.
@@ -115,7 +116,7 @@ class SqliteMetadataBackend:
         try:
             with transaction(self.con):
                 self._execute(
-                    "INSERT into files values (?, ?, ?, ?)", path, fingerprint, checksum_type, checksum, time
+                    "INSERT into files values (?, ?, ?, ?, ?)", path, fingerprint, checksum_type, checksum, time
                 )
         except sqlite3.IntegrityError as e:
             raise e

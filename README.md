@@ -15,6 +15,7 @@ It __*makex*__ stuff happen. 🙂
 - Dependency Graphs
 - Caching
 - Workspaces
+- Copy on Write
 
 <!-- links -->
 
@@ -23,7 +24,7 @@ It __*makex*__ stuff happen. 🙂
 - [Documentation](https://meta.company/go/makex)
 - [Installation Instructions](https://meta.company/go/makex/install)
 - [Troubleshooting](https://meta.company/go/makex/trouble)
-- Support: [Google Groups](http://groups.google.com/group/makex) or [makex+subscribe@googlegroups.com](mailto://makex+subscribe@googlegroups.com)
+- Support: [Google Groups](http://groups.google.com/group/makex) or [makex@googlegroups.com](mailto://makex@googlegroups.com)
 
 <!-- quick-start -->
 

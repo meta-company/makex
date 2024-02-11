@@ -41,7 +41,7 @@ To further increase verbosity, see the {option}`--verbose <makex --verbose>` opt
 
 ## Problems
 
-### My program completes sucessfully, but still has an non-zero exit code.
+### My program completes successfully, but still has a non-zero exit code.
 
 At the moment, you'll need to fix your tool or wrap it in a script/executable that handles the error and returns a non-zero exit code.
 
@@ -59,10 +59,10 @@ If you don't want to see these messages, address the warnings, use a flag to qui
 ### Makex hangs while running a command
 
 NOTE: If a shell/execute/command waits for input, Makex will hang. This is by design. 
-Several targets/runnables may be run in parallel, and it's indeterminable which
-target/runnables needs which standard input.
+Several excutables may be run in parallel, and it's indeterminable which
+one needs which standard input.
 
-Repeat, all executables makex runs must not require and wait user input (e.g. using readline()).
+Repeat, all executables Makex runs must not require and wait user input (e.g. using readline()).
 
 Some steps to debug a hang:
 
