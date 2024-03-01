@@ -3,16 +3,9 @@ import os
 import re
 import shlex
 import shutil
-import sys
-import time
 from abc import (
     ABC,
     abstractmethod,
-)
-from collections import deque
-from concurrent.futures import (
-    Future,
-    ThreadPoolExecutor,
 )
 from dataclasses import dataclass
 from io import StringIO
@@ -23,19 +16,15 @@ from os.path import (
     join,
 )
 from pathlib import Path
-from threading import (
-    Event,
-    current_thread,
-)
 from typing import (
     Any,
     Iterable,
+    Mapping,
     Optional,
     Pattern,
     Protocol,
     TypedDict,
     Union,
-    Mapping,
 )
 
 from makex._logging import (
@@ -45,14 +34,17 @@ from makex._logging import (
 )
 from makex.build_path import get_build_path
 from makex.constants import (
-    DIRECT_REFERENCES_TO_MAKEX_FILES,
     ENVIRONMENT_VARIABLES_IN_GLOBALS_ENABLED,
     HASH_USED_ENVIRONMENT_VARIABLES,
+    IGNORE_NONE_VALUES_IN_LISTS,
     OUTPUT_DIRECTLY_TO_CACHE,
     WORKSPACES_IN_PATHS_ENABLED,
 )
 from makex.context import Context
-from makex.errors import ExecutionError
+from makex.errors import (
+    ExecutionError,
+    MakexError,
+)
 from makex.file_checksum import FileChecksum
 from makex.file_system import find_files
 from makex.flags import (
@@ -62,12 +54,12 @@ from makex.flags import (
     FIND_FUNCTION_ENABLED,
     FIND_IN_INPUTS_ENABLED,
     GLOB_FUNCTION_ENABLED,
+    GLOBS_IN_ACTIONS_ENABLED,
     GLOBS_IN_INPUTS_ENABLED,
-    GLOBS_IN_RUNNABLES_ENABLED,
     HOME_FUNCTION_ENABLED,
     NAMED_OUTPUTS_ENABLED,
-    NESTED_WORKSPACES_ENABLED,
     SHELL_USES_RETURN_CODE_OF_LINE,
+    TARGET_PATH_ENABLED,
 )
 from makex.patterns import (
     combine_patterns,
@@ -77,7 +69,6 @@ from makex.protocols import (
     CommandOutput,
     FileProtocol,
     StringHashFunction,
-    TargetProtocol,
 )
 from makex.python_script import (
     FileLocation,
@@ -92,7 +83,6 @@ from makex.run import run
 from makex.target import (
     ArgumentData,
     EvaluatedTarget,
-    TargetKey,
     format_hash_key,
     target_hash,
 )
@@ -307,7 +297,9 @@ class PathElement:
         resolved = None
         if other.resolved and self.resolved:
             raise TypeError(
-                f"Can't combine two fully absolute resolved Paths. The first path must be absolute, and the other path must be relative \n. Unsupported operation {self} / {other}"
+                f"Can't combine two fully absolute resolved Paths. "
+                f"The first path must be absolute, and the other path must be relative \n. "
+                f"Unsupported operation {self} / {other}"
             )
         else:
             if self.resolved:
@@ -328,10 +320,14 @@ class PathElement:
             raise Exception("Can't use unresolved path here.")
 
 
-def _validate_path(parts: Union[list[str], tuple[str]], location: FileLocation):
+def _validate_path(
+    parts: Union[list[str], tuple[str]],
+    location: FileLocation,
+    absolute=ABSOLUTE_PATHS_ENABLED,
+):
     if ".." in parts:
         raise PythonScriptError("Relative path references not allowed in makex.", location)
-    if ABSOLUTE_PATHS_ENABLED is False and parts[0] == "/":
+    if parts[0] == "/" and absolute is False:
         raise PythonScriptError("Absolute path references not allowed in makex.", location)
     return True
 
@@ -360,7 +356,7 @@ def resolve_string_path_workspace(
     _validate_path(path.parts, element.location)
 
     if path.parts[0] == "//":
-        trace("Workspace path: %s %s", workspace, element)
+        #trace("Workspace path: %s %s", workspace, element)
         if WORKSPACES_IN_PATHS_ENABLED:
             _path = workspace.path / Path(*path.parts[1:])
         else:
@@ -486,6 +482,9 @@ def resolve_pathlike_list(
             yield from resolve_glob(ctx, target, base, value, ignore_names=ignore)
         elif isinstance(value, PathObject):
             yield value.path
+        elif IGNORE_NONE_VALUES_IN_LISTS and value is None:
+            continue
+
         else:
             #raise ExecutionError(f"{type(value)} {value!r}", target, getattr(value, "location", target))
             raise NotImplementedError(f"Invalid argument in pathlike list: {type(value)} {value!r}")
@@ -511,8 +510,8 @@ def resolve_string_argument_list(
             #source = _path_element_to_path(base, value)
             yield source.as_posix()
         elif isinstance(value, Glob):
-            if not GLOBS_IN_RUNNABLES_ENABLED:
-                raise ExecutionError("glob() can't be used in runnables.", target, value.location)
+            if not GLOBS_IN_ACTIONS_ENABLED:
+                raise ExecutionError("glob() can't be used in actions.", target, value.location)
 
             # todo: use glob cache from ctx for multiples of the same glob during a run
             #pattern = make_glob_pattern(value.pattern)
@@ -524,6 +523,10 @@ def resolve_string_argument_list(
             )
         elif isinstance(value, Expansion):
             yield str(value)
+        elif isinstance(value, tuple):
+            yield from resolve_string_argument_list(ctx, target, base, name, value)
+        elif IGNORE_NONE_VALUES_IN_LISTS and value is None:
+            continue
         else:
             raise NotImplementedError(f"{type(value)} {value!r}")
 
@@ -657,7 +660,7 @@ def make_hash_from_dictionary(d: dict[str, str]):
     return target_hash("|".join(flatten))
 
 
-class RunnableElementProtocol(Protocol):
+class ActionElementProtocol(Protocol):
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> dict[str, Any]:
         ...
 
@@ -665,7 +668,7 @@ class RunnableElementProtocol(Protocol):
         ...
 
 
-class InternalRunnableBase(ABC):
+class InternalActionBase(ABC):
     location: FileLocation = None
 
     @abstractmethod
@@ -681,7 +684,7 @@ class InternalRunnableBase(ABC):
 
     @abstractmethod
     def hash(self, ctx: Context, arguments: dict[str, Any], hash_function: StringHashFunction):
-        # produce a hash of the runnable with the given arguments and functions
+        # produce a hash of the Action with the given arguments and functions
         # TODO: make abstract once we migrate everything over to the new argument functionality
         raise NotImplementedError
 
@@ -690,11 +693,11 @@ class InternalRunnableBase(ABC):
         raise NotImplementedError
 
     def __str__(self):
-        return PythonScriptError("Converting Runnable to string not allowed.", self.location)
+        return PythonScriptError("Converting Action to string not allowed.", self.location)
 
 
 @dataclass
-class Execute(InternalRunnableBase):
+class Execute(InternalActionBase):
     executable: PathLikeTypes
     arguments: Union[tuple[AllPathLike], tuple[AllPathLike, ...]]
     environment: dict[str, str]
@@ -722,6 +725,9 @@ class Execute(InternalRunnableBase):
                 arguments.extend(
                     resolve_string_argument_list(ctx, target, target_input, target.name, argument)
                 )
+            elif argument is None:
+                # XXX: Ignore None arguments as they may be the result of a condition.
+                continue
             else:
                 raise PythonScriptError(
                     f"Invalid argument type: {type(argument)}: {argument}", target.location
@@ -774,7 +780,7 @@ class Execute(InternalRunnableBase):
         return hash_function("|".join([_executable] + _arguments))
 
 
-class ShellCommand(InternalRunnableBase):
+class ShellCommand(InternalActionBase):
     string: list[StringValue]
     location: FileLocation
 
@@ -799,6 +805,7 @@ class ShellCommand(InternalRunnableBase):
 
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> ArgumentData:
         args = {}
+        # TODO: validate string type
         args["string"] = self.string
         args["preamble"] = self.preamble
 
@@ -819,6 +826,7 @@ class ShellCommand(InternalRunnableBase):
         _script.append("__error=0")
         #script.append(r"IFS=$'\n'")
         for i, line in enumerate(string):
+
             #script.append(f"({line}) || (exit $?)")
             if ctx.verbose > 0 or ctx.debug:
                 _script.append(
@@ -882,7 +890,7 @@ def file_ignore_function(output_folder_name):
 
 
 @dataclass
-class Copy(InternalRunnableBase):
+class Copy(InternalActionBase):
     source: Union[list[AllPathLike], PathLikeTypes]
     destination: PathLikeTypes
     exclude: list[AllPathLike]
@@ -901,7 +909,8 @@ class Copy(InternalRunnableBase):
         for source in sources:
             parts.append(hash_function(source.as_posix()))
 
-        parts.append(hash_function(destination.as_posix()))
+        if destination is not None:
+            parts.append(hash_function(destination.as_posix()))
 
         if exclusions:
             parts.append(hash_function(exclusions.pattern))
@@ -939,7 +948,7 @@ class Copy(InternalRunnableBase):
                 value=self.destination
             )
         else:
-            destination = target.path
+            destination = None
 
         excludes = None
         if self.exclude:
@@ -974,9 +983,16 @@ class Copy(InternalRunnableBase):
         destination: Path = arguments.get("destination")
         excludes: Pattern = arguments.get("excludes")
 
+        destination_specified = destination is not None
+        if destination_specified:
+            destination_is_folder = destination.is_dir()
+        else:
+            destination = target.path
+            destination_is_folder = True
+
         copy_file = ctx.copy_file_function
 
-        if not destination.exists():
+        if destination.exists() is False:
             debug("Create destination %s", destination)
             if ctx.dry_run is False:
                 destination.mkdir(parents=True)
@@ -1006,7 +1022,20 @@ class Copy(InternalRunnableBase):
                     _names.add(name)
             return _names
 
-        # sometimes
+        # XXX: keep n sources so we can determine which form of copy() we have (8 forms).
+        #  copy(items) will always use the file/folder name in the items list
+        #  copy(file, file) copy a file to specified file path.
+        #  copy(folder, folder) allows renaming or mirroring a folder.
+        #  copy(folders, folder) copies a set of folders to the specified folder..
+        #  copy(files, folder) copies a set of files to the specified folder.
+        #  copy(files)
+        #  copy(file)
+        #  copy(folders)
+        #  copy(folder)
+
+        #  copy(file, "folder" / file) allows renaming a file and prefixing it into a folder.
+        n_sources = len(sources)
+
         for source in sources:
 
             if not source.exists():
@@ -1021,8 +1050,25 @@ class Copy(InternalRunnableBase):
                 continue
 
             #trace("Copy source %s", source)
-            if source.is_dir():
+            if destination_specified:
+                # destination was specified, one of:
+                # copy(folder, folder)
+                # copy(folders, folder)
+                # copy(file, file)
+                # copy(files, destination)
+                if n_sources == 1:
+                    _destination = destination
+                else:
+                    _destination = destination / source.name
+            else:
+                # destination not specified, one of:
+                # copy(folder)
+                # copy(folders)
+                # copy(file)
+                # copy(files)
                 _destination = destination / source.name
+
+            if source.is_dir():
                 debug("Copy tree %s <- %s", _destination, source)
 
                 if ctx.dry_run is False:
@@ -1058,14 +1104,13 @@ class Copy(InternalRunnableBase):
                         string = "\n".join(string)
                         raise ExecutionError(string, target, target.location) from e
             else:
-                trace("Copy file %s <- %s", destination / source.name, source)
+                trace("Copy file %s <- %s", _destination, source)
                 if ctx.dry_run is False:
                     try:
-                        copy_file(source.as_posix(), (destination / source.name).as_posix())
-
+                        copy_file(source.as_posix(), _destination.as_posix())
                     except (OSError, shutil.Error) as e:
                         raise ExecutionError(
-                            f"Error copying file {source} to {destination/source.name}: {e}",
+                            f"Error copying file {source} to {_destination}: {e}",
                             target,
                             target.location
                         ) from e
@@ -1073,7 +1118,7 @@ class Copy(InternalRunnableBase):
 
 
 @dataclass
-class Synchronize(InternalRunnableBase):
+class Synchronize(InternalActionBase):
     """
         synchronize/mirror files much like rsync.
 
@@ -1141,7 +1186,7 @@ class Synchronize(InternalRunnableBase):
                 name="source",
                 base=target.input_path,
                 values=_source_list,
-                glob=GLOBS_IN_RUNNABLES_ENABLED,
+                glob=GLOBS_IN_ACTIONS_ENABLED,
             )
         )
         trace("Synchronize sources %s", sources)
@@ -1188,29 +1233,27 @@ class Synchronize(InternalRunnableBase):
                 raise ExecutionError(
                     f"Missing source/input file {source} in sync()", target, location=self.location
                 )
-            if source.is_dir():
-                # Fix up destination; source relative should match destination relative.
-                if source.is_relative_to(target.input_path):
-                    _destination = destination / source.relative_to(target.input_path)
-                    if ctx.dry_run is False:
-                        _destination.mkdir(parents=True, exist_ok=True)
-                else:
-                    _destination = destination
 
-                trace("Copy tree %s <- %s", _destination, source)
+            # Fix up destination; source relative should match destination relative.
+            if source.parent.is_relative_to(target.input_path):
+                _destination = destination / source.parent.relative_to(target.input_path)
+
                 if ctx.dry_run is False:
-                    # copy recursive
-                    shutil.copytree(source, _destination, dirs_exist_ok=True, ignore=ignore)
+                    _destination.mkdir(parents=True, exist_ok=True)
             else:
-                if source.parent.is_relative_to(target.input_path):
-                    _destination = destination / source.parent.relative_to(target.input_path)
+                _destination = destination
 
-                    if ctx.dry_run is False:
-                        _destination.mkdir(parents=True, exist_ok=True)
-
+            if source.is_dir():
+                # copy recursive
+                trace("Copy tree %s <- %s", _destination, source)
+                if ctx.dry_run:
+                    continue
+                shutil.copytree(source, _destination, dirs_exist_ok=True, ignore=ignore)
+            else:
                 trace("Copy file %s <- %s", _destination / source.name, source)
-                if ctx.dry_run is False:
-                    shutil.copy(source, _destination / source.name)
+                if ctx.dry_run:
+                    continue
+                shutil.copy(source, _destination / source.name)
 
         return CommandOutput(0)
 
@@ -1222,7 +1265,7 @@ class Synchronize(InternalRunnableBase):
 
 
 @dataclass
-class Print(InternalRunnableBase):
+class Print(InternalActionBase):
     messages: list[str]
 
     def __init__(self, messages, location):
@@ -1244,7 +1287,7 @@ class Print(InternalRunnableBase):
 
 
 @dataclass
-class Write(InternalRunnableBase):
+class Write(InternalActionBase):
     path: PathLikeTypes
     data: StringValue
 
@@ -1301,7 +1344,7 @@ class Write(InternalRunnableBase):
         return hash_function("|".join(parts))
 
 
-class SetEnvironment(InternalRunnableBase):
+class SetEnvironment(InternalActionBase):
     environment: dict[StringValue, Union[StringValue, PathLikeTypes]]
 
     def __init__(self, environment: dict, location: FileLocation):
@@ -1342,7 +1385,7 @@ class SetEnvironment(InternalRunnableBase):
         return hash_function(environment_string)
 
 
-@dataclass
+@dataclass(frozen=True)
 class TargetReferenceElement:
     """
     A reference to a target in a makex file: Target(name, path).
@@ -1361,7 +1404,7 @@ class TargetReferenceElement:
         return f"TargetReferenceElement({self.name.value!r})"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResolvedTargetReference:
     """
     Used in a target graph and for external matching.
@@ -1387,11 +1430,34 @@ class ResolvedTargetReference:
         return hash(self.key())
 
 
+class TargetType:
+    def _get_item(self, subscript, location: FileLocation):
+        if isinstance(subscript, slice):
+            # handle target[start:stop:step]
+            # TODO: use step for variants.
+            start, stop, step = subscript.start, subscript.stop, subscript.step
+            if start is None and stop:
+                return TargetReferenceElement(stop)
+            elif start and stop is None:
+                return TargetReferenceElement(stop)
+            elif start and stop:
+                TargetReferenceElement(stop, start, location=location)
+        else:
+            # handle target[item]
+            # TODO: handle locations
+            if not isinstance(subscript, StringValue):
+                raise PythonScriptError(
+                    f"Subscript must be a string. Got {subscript!r} ({type(subscript)})",
+                    location=location
+                )
+            return TargetReferenceElement(subscript, location=location)
+
+
 class TargetObject:
     name: StringValue
     path: PathElement
     requires: list[Union[PathElement, PathObject, "TargetObject"]]
-    commands: list[RunnableElementProtocol]
+    commands: list[ActionElementProtocol]
 
     # outputs as a list. fast checks if has any outputs
     outputs: list[PathElement]
@@ -1558,7 +1624,7 @@ def resolve_target_output_path(ctx, target: TargetObject):
     return target_output_path, real_path
 
 
-class MakexFileCycleError(Exception):
+class MakexFileCycleError(MakexError):
     detection: TargetObject
     cycles: list[TargetObject]
 
@@ -1593,283 +1659,6 @@ class MakexFileCycleError(Exception):
         return string.getvalue()
 
 
-class TargetGraph:
-    # NOTE: We use TargetObject here because we use isinstance checks
-
-    targets: list[TargetObject]
-
-    def __init__(self):
-        # TODO: we could probably merge TargetKey and file keys and all of these dictionaries.
-
-        # TargetKey -> object
-        self.targets: dict[TargetKey, TargetObject] = {}
-
-        # map of TargetKey to all of it's requirements
-        self._requires: dict[TargetKey, list[TargetObject]] = {}
-
-        # map of TargetKey to all the Files/paths it provides
-        self._provides: dict[TargetKey, list[PathLike]] = {}
-
-        # map from all the files inputting into TargetObject
-        self._files_to_target: dict[PathLike, set[TargetObject]] = {}
-
-        # map from TargetKey to all the things it provides to
-        self._provides_to: dict[TargetKey, set[TargetObject]] = {}
-
-    def __contains__(self, item: ResolvedTargetReference):
-        return item.key() in self.targets
-
-    def get_target(self, t) -> Optional[TargetObject]:
-        #debug("Find %s in %s. key=%s", t, self.targets, t.key())
-        return self.targets.get(t.key(), None)
-
-    def in_degree(self) -> Iterable[tuple[TargetObject, int]]:
-        for key, target in self.targets.items():
-            yield (target, len(self._provides_to.get(key, [])))
-
-    def add_targets(self, ctx: Context, *targets: TargetObject):
-        assert isinstance(ctx, Context)
-        assert ctx.workspace_object
-
-        for target in targets:
-            self.add_target(ctx, target)
-
-    def _process_target_requirements(
-        self,
-        ctx: Context,
-        target: TargetObject,
-    ) -> Iterable[TargetObject]:
-
-        target_input_path = target.path_input()
-        makex_file_path = Path(target.location.path)
-
-        for require in target.requires:
-            if isinstance(require, PathElement):
-                # a simple path to a file.. declared as Path() or automatically parsed
-                # resolve the input file path
-                if False:
-                    path = require._as_path()
-
-                    if not path.is_absolute():
-                        # make path relative to target
-                        path = target_input_path / path
-
-                path = resolve_path_element_workspace(
-                    ctx, target.workspace, require, target_input_path
-                )
-
-                # point file -> current target
-                self._files_to_target.setdefault(path, set()).add(target)
-                continue
-            elif isinstance(require, TargetObject):
-                # add to rdeps map
-                self._provides_to.setdefault(require.key(), set()).add(target)
-                # add to requires map
-                #requirements.append(require)
-                # TODO: this is for tests only. should yield a ResolvedTargetReference
-                yield require
-            elif isinstance(require, TargetReferenceElement):
-                # reference to a target, either internal or outside the makex file
-                name = require.name.value
-                path = require.path
-
-                #trace("reference input is %r: %r", require, path)
-
-                location = require.location
-                if isinstance(path, StringValue):
-                    # Target(name, "some/path")
-                    location = path.location
-                    #_path = Path(path.value)
-                    _path = resolve_string_path_workspace(
-                        ctx, target.workspace, path, target_input_path
-                    )
-                elif isinstance(path, PathElement):
-                    # Target(name, Path())
-                    location = path.location
-
-                    _path = resolve_path_element_workspace(
-                        ctx, target.workspace, path, target_input_path
-                    )
-                elif path is None:
-                    # Target(name)
-                    _path = makex_file_path
-                elif isinstance(path, str):
-                    # XXX: this is used for testing only. we should not be dealing with str (instead we should a StringValues)
-                    location = FileLocation(None, None, target.location)
-                    _path = Path(path)
-                else:
-                    raise ExecutionError(
-                        f"Invalid target reference path: Type: {type(path)} {path}",
-                        target,
-                        getattr(path, "location", None)
-                    )
-
-                if not _path.is_absolute():
-                    _path = target_input_path / _path
-
-                if _path.is_dir():
-                    # find the makexfile it's referring to
-                    file = find_makex_files(_path, ctx.makex_file_names)
-                    if file is None:
-                        raise ExecutionError(
-                            f"No makex file found at {_path}. Invalid target reference.",
-                            target,
-                            path.location
-                        )
-                else:
-                    file = _path
-
-                #trace("Got reference %r %r", name, file)
-                #requirements.append(ResolvedTargetReference(name, path))
-                yield ResolvedTargetReference(name, file, location=location)
-            elif isinstance(require, (FindFiles, Glob)):
-                # These things will be resolved in a later pass.
-                # TODO: we may want to resolve these early and keep a cache.
-                pass
-            else:
-                raise NotImplementedError(f"Type: {type(require)}")
-
-    def add_target(self, ctx: Context, target: TargetObject):
-        # add targetobjects during parsing
-
-        # add all the targets we encountered during evaluation
-        self.targets[target.key()] = target
-
-        key = target.key()
-        self._requires[key] = requirements = []
-
-        if target.requires:
-            #### process the requirements, a list of PathElement(input file) | StringValue | Target
-            for requirement in self._process_target_requirements(ctx, target):
-                requirements.append(requirement)
-
-        self._provides[key] = provides = []
-
-        #trace("Add target to graph: %r", target)
-        output_path, real_path = resolve_target_output_path(ctx, target)
-
-        if output_path:
-            pass
-
-        if target.outputs:
-            for output in target.all_outputs():
-                if isinstance(output, PathElement):
-                    output = resolve_path_element_workspace(
-                        ctx, target.workspace, output, output_path
-                    )
-                    #output = output._as_path()
-
-                    #if not output.is_absolute():
-                    # make path relative to target
-                    #    output = output_path / output
-                elif isinstance(output, PathObject):
-                    output = output.path
-                elif isinstance(output, StringValue):
-                    output = Path(output.value)
-
-                    if not output.is_absolute():
-                        # make path relative to target
-                        output = output_path / output
-
-                elif isinstance(output, (FindFiles, Glob)):
-                    pass
-                else:
-                    raise NotImplementedError(f"Invalid output type {type(output)} {output}")
-
-                provides.append(output)
-
-    def get_requires(
-        self,
-        target: TargetProtocol,
-        recursive=False,
-        _seen: set = None,
-    ) -> Iterable[TargetObject]:
-        # XXX: faster version of get_requires without cycle detection. used by the executor/downstream
-        # query the graph for requirements in reverse order (farthest to closest)
-        # TODO: we should be able to remove _seen entirely.
-        _seen = set() if _seen is None else _seen
-
-        if target in _seen:
-            return
-
-        _seen.add(target)
-
-        for requirement in self._requires.get(target.key(), []):
-            if requirement in _seen:
-                continue
-
-            if recursive:
-                yield from self.get_requires(requirement, recursive=recursive, _seen=_seen)
-
-            yield requirement
-
-    def get_requires_detect_cycles(
-        self,
-        target: TargetProtocol,
-        recursive=False,
-        _stack: list = None,
-        _seen: set = None
-    ) -> Iterable[TargetObject]:
-        # query the graph for requirements in reverse order (farthest to closest)
-        _stack = list() if _stack is None else _stack
-        _seen = set() if _seen is None else _seen
-
-        #trace("Get requires and detect cycles %r", target)
-        if target in _stack:
-            return
-
-        _stack.append(target)
-
-        _seen.add(target)
-
-        for requirement in self._requires.get(target.key(), []):
-            requirement: TargetObject = requirement
-
-            if requirement in _seen:
-                continue
-
-            if requirement in _stack:
-                #error("CYCLES %r: %r", requirement, _seen)
-                target = self.targets.get(requirement.key())
-                # reverse so we see the most recent file depended on.
-                reverse = [self.targets.get(s.key()) for s in reversed(_stack)]
-                raise MakexFileCycleError(
-                    f"Internal cycle detected: {requirement!r}", target, reverse
-                )
-
-            if recursive:
-                yield from self.get_requires_detect_cycles(
-                    requirement, recursive=recursive, _stack=_stack, _seen=_seen
-                )
-
-            yield requirement
-
-        _stack.pop()
-
-    def get_outputs(self, *targets, recursive=False) -> Iterable[FileProtocol]:
-        # reverse dependencies of targets
-        # targets outputs + outputs for each of targets.requires
-        for target in targets:
-            yield from self._provides.get(target, [])
-
-            if recursive:
-                yield from self.get_outputs(target.requires)
-
-    def topological_sort_grouped(self: "TargetGraph", start: list[TargetObject]):
-        indegree_map = {v: d for v, d in self.in_degree() if d > 0}
-        zero_indegree = [v for v, d in self.in_degree() if d == 0]
-
-        while zero_indegree:
-            yield zero_indegree
-            new_zero_indegree = []
-            for v in zero_indegree:
-                for child in self.get_requires_detect_cycles(v):
-                    indegree_map[child] -= 1
-                    if not indegree_map[child]:
-                        new_zero_indegree.append(child)
-            zero_indegree = new_zero_indegree
-
-
 def find_makex_files(path, names):
     for name in names:
         check = path / name
@@ -1893,7 +1682,7 @@ class FileObject(FileProtocol):
 SENTINEL = object()
 
 
-class EnvironmentProxy:
+class EnvironmentVariableProxy:
     def __init__(self, env):
         self.__env = env
         # record usages of environment variables so we can include it as part of the hashing of targets/makex files.
@@ -1912,14 +1701,13 @@ class EnvironmentProxy:
         return self.__usages
 
 
-class MakefileScriptEnv(ScriptEnvironment):
+class MakexFileScriptEnvironment(ScriptEnvironment):
     def __init__(
         self,
         ctx,
         directory: Path,
         path: Path,
         workspace: Workspace = None,
-        checksum: str = None,
         targets: dict[str, TargetObject] = None,
         makex_file: "MakexFile" = None,
     ):
@@ -1930,12 +1718,11 @@ class MakefileScriptEnv(ScriptEnvironment):
 
         self.ctx = ctx
         # TODO: wrap environment dict so it can't be modified
-        self.environment = EnvironmentProxy(ctx.environment)
+        self.environment = EnvironmentVariableProxy(ctx.environment)
         self.targets = {} if targets is None else targets
         #self.variables = []
         self.build_paths = []
         self.workspace = workspace
-        self.makex_file_checksum = checksum
         self.makex_file = makex_file or None
 
     def globals(self):
@@ -1963,12 +1750,13 @@ class MakefileScriptEnv(ScriptEnvironment):
         if FIND_FUNCTION_ENABLED:
             g["find"] = wrap_script_function(self._function_find)
 
-        # runnables
+        # Actions
         g.update(
             {
                 "print": wrap_script_function(self._function_print),
                 "shell": wrap_script_function(self._function_shell),
                 "sync": wrap_script_function(self._function_sync),
+                "mirror": wrap_script_function(self._function_sync),
                 "execute": wrap_script_function(self._function_execute),
                 "copy": wrap_script_function(self._function_copy),
                 "write": wrap_script_function(self._function_write),
@@ -2306,6 +2094,12 @@ class MakefileScriptEnv(ScriptEnvironment):
                     f"Invalid outputs type {type(outputs)}. Should be a list.", location
                 )
 
+        if TARGET_PATH_ENABLED is False and path is not None:
+            raise PythonScriptError(
+                "Setting path is not allowed (by flag). TARGET_PATH_ENABLED",
+                getattr(path, "location", location)
+            )
+
         target = TargetObject(
             name=name,
             path=path,
@@ -2319,6 +2113,30 @@ class MakefileScriptEnv(ScriptEnvironment):
         )
         self.targets[name] = target
         return None
+
+
+DISABLE_ASSIGNMENT_NAMES = {
+    "target",
+    "path",
+    "execute",
+    "shell",
+    "copy",
+    "print",
+    "Environment",
+    "environment",
+    "glob",
+    "pattern",
+    "input",
+    "inputs",
+    "output",
+    "outputs",
+    "find",
+    "Path",
+    "source",
+    "home",
+    "archive",
+    "sync"
+}
 
 
 class MakexFile:
@@ -2348,14 +2166,13 @@ class MakexFile:
 
         makefile = cls(ctx, path, checksum=checksum_str)
 
-        env = MakefileScriptEnv(
+        env = MakexFileScriptEnvironment(
             ctx,
             directory=path.parent,
             path=path,
             makex_file=makefile,
             targets=makefile.targets,
             workspace=workspace,
-            checksum=checksum_str,
         )
 
         _globals = {}
@@ -2365,7 +2182,7 @@ class MakexFile:
             _globals.update(ctx.environment)
 
         script = PythonScriptFile(path, env, _globals)
-
+        script.set_disabled_assignment_names(DISABLE_ASSIGNMENT_NAMES)
         with path.open("rb") as f:
             script.execute(f)
 
@@ -2379,410 +2196,3 @@ class MakexFile:
 
         debug("Finished parsing makefile %s.", path)
         return makefile
-
-
-class ParseResult:
-    makex_file: MakexFile = None
-    errors: deque[PythonScriptError]
-
-    def __init__(self, makex_file=None, errors=None):
-        self.errors = errors
-        self.makex_file = makex_file
-
-
-def parse_makefile_into_graph(
-    ctx: Context,
-    path: Path,
-    graph: TargetGraph,
-    threads=2,
-    allow_makex_files=DIRECT_REFERENCES_TO_MAKEX_FILES,
-) -> ParseResult:
-    assert ctx.workspace_object
-
-    # link from path -> path so we can detect cycles
-    linkages: dict[ResolvedTargetReference, list[ResolvedTargetReference]] = {}
-
-    # set this event to stop the parsing loop
-    stop = Event()
-
-    # any errors collected during parsing
-    errors = deque()
-
-    # any makefiles completed (either success or error)
-    completed: deque[Path] = deque()
-
-    # paths added to thread pool ready to parse
-    executing: deque[Path] = deque()
-
-    # waiting to be queued for work; requirements added from other files
-    input_queue: deque[Path] = deque([path])
-
-    _initial = path
-    _finished: dict[Path, MakexFile] = {}
-
-    def stop_and_error(error):
-        stop.set()
-        errors.append(error)
-
-    def _iterate_target_requires(
-        makefile_path: Path,
-        makefile: MakexFile,
-        target: TargetObject,
-    ) -> Iterable[ResolvedTargetReference]:
-        # yields a list of Paths the specified makefile requires
-        #debug("Check requires %s -> %s", target, target.requires)
-        #target_input = makefile.directory
-        target_input = target.path_input()
-        workspace = target.workspace
-
-        assert isinstance(workspace, Workspace)
-
-        for require in target.requires:
-            trace("Process requirement %s", require)
-            if isinstance(require, TargetObject):
-                # we have a Target object.
-                # TODO: This is used in testing. Not really important.
-                # Manually constructed target objects.
-                trace("Yield target", require)
-                makex_file = require.makex_file_path
-                yield ResolvedTargetReference(
-                    require.name, Path(makex_file), location=require.location
-                )
-
-            elif isinstance(require, TargetReferenceElement):
-                name = require.name
-                path = require.path
-
-                if isinstance(path, StringValue):
-                    # Target(name, "path/to/target")
-                    #trace("Path is string value: %r", path)
-                    search_path = resolve_string_path_workspace(
-                        ctx, target.workspace, path, target_input
-                    )
-
-                    trace("Resolve search path from string %r: %s", path, search_path)
-                    # we could have a directory, or we could have a file
-                    if search_path.is_file():
-                        if allow_makex_files:
-                            yield ResolvedTargetReference(name, search_path, path.location)
-                            continue
-                        else:
-                            error = ExecutionError(
-                                "References directly to makex files are not allowed."
-                                " Strip the makex file name.",
-                                target,
-                                path.location
-                            )
-                            stop_and_error(error)
-                            raise error
-                    #trace("Searching path for makex files: %s", search_path)
-                    makex_file = find_makex_files(search_path, ctx.makex_file_names)
-
-                    trace("Resolved makex file from string %s: %s", path, makex_file)
-                    if makex_file is None:
-                        error = ExecutionError(
-                            f"No makex files found in path {search_path} {path!r} for the target's requirements."
-                            f" Tried: {ctx.makex_file_names!r} {target}",
-                            target,
-                            path.location
-                        )
-                        stop_and_error(error)
-                        raise error
-                    yield ResolvedTargetReference(name, makex_file, path.location)
-                elif isinstance(path, PathElement):
-                    # allow users to specify an absolute path to
-                    # Target(name, Path("path/to/something")))
-                    search_path = resolve_path_element_workspace(
-                        ctx, target.workspace, path, target_input
-                    )
-                    trace("Resolve search path from %r: %s", path, search_path)
-
-                    # we could have a directory, or we could have a file
-                    if search_path.is_file():
-
-                        if allow_makex_files:
-                            yield ResolvedTargetReference(name, search_path, path.location)
-                            continue
-                        else:
-                            error = ExecutionError(
-                                "References directly to makex files are not allowed. Strip the makex file name.",
-                                target,
-                                path.location
-                            )
-                            stop_and_error(error)
-                            raise error
-                            break
-
-                    makex_file = find_makex_files(search_path, ctx.makex_file_names)
-
-                    trace("Resolved makex file from pathelement %s: %s", path, makex_file)
-                    if makex_file is None:
-                        error = ExecutionError(
-                            f"No makex files found in path {search_path} for the target's requirements.",
-                            target,
-                            path.location
-                        )
-                        stop_and_error(error)
-                        raise error
-
-                    yield ResolvedTargetReference(name, makex_file, path.location)
-                elif path is None:
-                    # Target(name)
-                    # we're referring to this file. we don't need to parse anything.
-                    yield ResolvedTargetReference(name, makefile_path, require.location)
-                else:
-                    debug("Invalid ref type %s: %r", type(path), path)
-                    exc = Exception(f"Invalid reference path type {type(path)}: {path!r}")
-                    stop_and_error(exc)
-                    raise exc
-                #debug("Got reference %s %s", name, path)
-                #l.append(ResolvedTargetReference(name, path))
-
-    def finished(makefile_path: Path, makefile: Future[MakexFile]):
-        makefile_path = Path(makefile_path)
-        trace("Makefile parsing finished in thread %s: %s", current_thread().ident, makefile_path)
-
-        e = makefile.exception()
-        if e:
-            if not isinstance(e, (ExecutionError, PythonScriptError)):
-                logging.error("Makefile had an error %s %r", e, e)
-                logging.exception(e)
-
-            errors.append(e)
-
-            mark_path_finished(makefile_path)
-            return
-
-        makefile = makefile.result()
-
-        _finished[makefile_path] = makefile
-
-        if makefile.targets:
-            trace(
-                "Adding %d targets from makefile...",
-                len(makefile.targets), #makefile.targets[:min(3, len(makefile.targets))]
-            )
-
-            # we're done. add the target references to the parsing input queue
-            for target_name, target in makefile.targets.items():
-                trace("Add target to graph %s %s ", target, target.key())
-                try:
-                    graph.add_target(ctx, target)
-                except ExecutionError as e:
-                    errors.append(e)
-                    mark_path_finished(makefile_path)
-                    return
-
-                t_as_ref = ResolvedTargetReference(
-                    target.name, Path(target.makex_file_path), target.location
-                )
-
-                trace("Check requires %s -> %r", target.key(), target.requires)
-
-                # TODO: store this iteration for later (target evaluation in Executor)
-                #  we're duplicating code there.
-                iterable = _iterate_target_requires(
-                    makefile=makefile,
-                    makefile_path=makefile_path,
-                    target=target,
-                )
-                for reference in iterable:
-                    # Check for any cycles BETWEEN files and targets.
-                    cycles = linkages.get(reference, None)
-                    #trace("Linkages of %s: %s", reference, cycles)
-                    linkages.setdefault(t_as_ref, list()).append(reference)
-                    if cycles and (t_as_ref in cycles):
-                        mark_path_finished(makefile_path)
-                        error = MakexFileCycleError(
-                            f"Cycle detected from {reference.key()} to {cycles[-1].key()}",
-                            target,
-                            cycles,
-                        )
-                        errors.append(error)
-                        raise error
-
-                    #trace("Got required path %s", reference)
-                    if reference.path in completed:
-                        trace("Path already completed %s. Possible cycle.", reference)
-                        continue
-
-                    trace("Add to parsing input queue %s", reference)
-                    input_queue.append(reference.path)
-                    target.add_resolved_requirement(reference)
-
-        #if path in queued:
-        trace("Remove from deque %s", makefile_path)
-        mark_path_finished(makefile_path)
-
-    def mark_path_finished(makefile_path: Path):
-        completed.append(makefile_path)
-
-        if makefile_path in executing:
-            executing.remove(makefile_path)
-
-    pool = ThreadPoolExecutor(threads)
-
-    try:
-        while stop.is_set() is False:
-
-            if len(input_queue) == 0:
-                debug("Stopped. Empty queue.")
-                stop.set()
-                continue
-
-            while len(executing) == threads:
-                debug("queue wait. %s", executing)
-                time.sleep(1)
-
-            path = input_queue.pop()
-
-            if path in executing:
-                input_queue.append(path)
-            else:
-                if path not in completed:
-                    if NESTED_WORKSPACES_ENABLED:
-                        workspace_of_makefile: Workspace = ctx.workspace_cache.get_workspace_of(
-                            path
-                        )
-                        trace(
-                            "Detected workspace of makefile at path %s: %s",
-                            path,
-                            workspace_of_makefile
-                        )
-                    else:
-                        # Use the root/initial workspace if no nesting.
-                        workspace_of_makefile = ctx.workspace_object
-
-                    debug(
-                        "Queue MakeFile for parsing %s (workspace=%s) ...",
-                        path,
-                        workspace_of_makefile
-                    )
-
-                    f = pool.submit(
-                        MakexFile.parse,
-                        ctx=ctx,
-                        path=Path(path),
-                        workspace=workspace_of_makefile,
-                    )
-                    # We must use a lambda passing the path because if we have
-                    #  an Exception we won't know which file caused it.
-                    f.add_done_callback(lambda future, p=path: finished(p, future))
-
-                    executing.append(path)
-                    input_queue.append(path)
-                    # XXX: this sleep is required so that is_set isn't called repeatedly (thousands of times+) when running.
-                    time.sleep(0.1)
-
-    finally:
-        debug("Wait for pool to shutdown...")
-        pool.shutdown()
-
-    return ParseResult(makex_file=_finished.get(_initial), errors=errors)
-
-
-def parse_target_string_reference(
-    ctx: Context,
-    base,
-    string,
-    check=True,
-) -> Optional[ResolvedTargetReference]:
-    # resolve the path/makefile?:target_or_build_path name
-    # return name/Path
-    parts = string.split(":", 1)
-    if len(parts) == 2:
-        path, target = parts
-        path = Path(path)
-        if not path.is_absolute():
-            path = base / path
-
-        if path.is_symlink():
-            path = path.readlink()
-    else:
-        target = parts[0]
-        path = base
-
-    if path.is_dir():
-        if check:
-            # check for Build/Makexfile in path
-            path, checked = find_makex_files(path, ctx.makex_file_names)
-            if path is None:
-                ctx.ui.print(
-                    f"Makex file does not exist for target specified: {target}", error=True
-                )
-                for check in checked:
-                    ctx.ui.print(f"- Checked in {check}")
-                sys.exit(-1)
-
-    return ResolvedTargetReference(target, path=path)
-
-
-#def _string_value_to_path(ctx, base, value: StringValue) -> Path:
-#    val = value.value
-#
-#    if False and val.startswith("~"):
-#        # TODO: use environment HOME to expand the user
-#        return Path(val).expanduser()
-#    else:
-#        path = Path(val)
-#
-#        if not path.is_absolute():
-#            path = base / path
-#
-#        return path
-
-#def _path_element_to_path(base, value: PathElement) -> Path:
-#    return resolve_path_element(value, base)
-#    if value.resolved:
-#        source = value.resolved
-#        if not source.is_absolute():
-#            source = base / source
-#    else:
-#        source = value._as_path()
-#        #source = source.expanduser()
-#        if not source.is_absolute():
-#            source = base / source
-#
-#    return source
-#def resolve_path_element(element: PathElement, base: Path) -> Path:
-#    """
-#    Resolve an unresolved relative PathObject.
-#
-#    :param element:
-#    :param base:
-#    :return:
-#    """
-#
-#    #if search_path.parts[0] == "//":
-#    #    error = NotImplementedError("Workspace paths not supported yet.")
-#    #    stop_and_error(error)
-#    #    break
-#
-#    if element.resolved:
-#        return element.resolved
-#
-#    path = Path(*element.parts)
-#
-#    if not path.is_absolute():
-#        path = base / path
-#    return path
-
-#def resolve_path_parts(parts: list[StringValue], base: Path, location) -> Path:
-#    path = Path(*parts)
-#
-#    _validate_path(path.parts, location)
-#
-#    if not path.is_absolute():
-#        path = base / path
-#
-#    return path
-
-#def resolve_string_path(element: StringValue, base: Path) -> Path:
-#    path = Path(element.value)
-#
-#    _validate_path(path.parts, element.location)
-#
-#    if not path.is_absolute():
-#        path = base / path
-#
-#    return path

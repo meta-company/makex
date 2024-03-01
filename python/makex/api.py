@@ -25,13 +25,13 @@ class Help:
     html: str
 
 
-class Runnable:
+class Action:
     def help(self):
         # return help documents
         pass
 
     def arguments(self):
-        # return the arguments the runnable takes, in order, but also named for keyword arguments.
+        # return the arguments the Action takes, in order, but also named for keyword arguments.
         # handle different types automatically like, list of path, path, dict[str], etc
         pass
 

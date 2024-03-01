@@ -48,9 +48,11 @@ from makex.errors import (
 )
 from makex.executor import Executor
 from makex.flags import VARIANTS_ENABLED
-from makex.make_file import (
+from makex.makex_file import (
     MakexFileCycleError,
     ResolvedTargetReference,
+)
+from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
 )
@@ -1262,7 +1264,7 @@ def main_run(args, extra_args):
         t = graph.get_target(target)
         if t is None:
             ctx.ui.print(
-                f"Target \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not in found in {target.path} {target}",
+                f"Target \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
                 error=True
             )
             sys.exit(-1)

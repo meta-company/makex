@@ -8,17 +8,16 @@ from typing import (
 )
 
 import pytest
-
 from makex.context import Context
 from makex.executor import Executor
-from makex.make_file import (
-    InternalRunnableBase,
+from makex.makex_file import (
+    InternalActionBase,
     PathElement,
     ResolvedTargetReference,
-    TargetGraph,
     TargetObject,
     TargetReferenceElement,
 )
+from makex.makex_file_parser import TargetGraph
 from makex.protocols import (
     CommandOutput,
     StringHashFunction,
@@ -137,7 +136,7 @@ def path(*args: Union[str, PathLike], parent=None):
     return PathElement(*args, resolved=None)
 
 
-class WriteTestRunnable(InternalRunnableBase):
+class WriteTestAction(InternalActionBase):
     def __init__(self, path: str, text, location=None):
         self.path: str = path
         self.text = text
@@ -169,7 +168,7 @@ class WriteTestRunnable(InternalRunnableBase):
 
 
 def write(path: str, text=None):
-    return WriteTestRunnable(path, text or str(path))
+    return WriteTestAction(path, text or str(path))
 
 
 def fake_location(path):

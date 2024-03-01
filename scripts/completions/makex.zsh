@@ -153,4 +153,12 @@ _shtab_makex_complete_target(){
 
 
 typeset -A opt_args
-_shtab_makex "$@"
+
+if [[ $zsh_eval_context[-1] == eval ]]; then
+  # eval/source/. command, register function for later
+  compdef _shtab_makex -N makex
+else
+  # autoload from fpath, call function directly
+  _shtab_makex "$@"
+fi
+

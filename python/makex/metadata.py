@@ -83,7 +83,7 @@ class Dirtyness:
 #    path:str
 
 class TargetMetadata:
-    # TODO: we should be able to serialize runnables/arguments
+    # TODO: we should be able to serialize Actions/arguments
     name: str
     path: str
     key: str
@@ -150,7 +150,7 @@ class TargetMetadata:
             c.start_time, c.end_time = timing
         for requirement in target.requires or []:
             requirement.key()
-            requirement.hash(ctx, hash_function=hash())
+            requirement.hash(ctx, hash_function=hash_function)
         return c
 
     def dirty(self, ctx: Context, target: EvaluatedTarget) -> Dirtyness:

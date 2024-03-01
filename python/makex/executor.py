@@ -38,10 +38,10 @@ from makex.errors import (
     MultipleErrors,
 )
 from makex.file_checksum import FileChecksum
-from makex.make_file import (
+from makex.makex_file import (
     FindFiles,
     Glob,
-    InternalRunnableBase,
+    InternalActionBase,
     ListTypes,
     MakexFileCycleError,
     PathElement,
@@ -64,11 +64,14 @@ from makex.python_script import (
     PythonScriptError,
     StringValue,
 )
-from makex.run import get_running_process_ids
+from makex.run import (
+    CORRECTED_RETURN_CODE,
+    get_running_process_ids,
+)
 from makex.target import (
     EvaluatedTarget,
     EvaluatedTargetGraph,
-    InternalRunnable,
+    InternalAction,
     TargetKey,
     brief_target_name,
 )
@@ -205,7 +208,6 @@ class Executor:
         :return:
         """
         # returns a list of targets finished/completed and any errors/exceptions
-        #self.finished = deque()
         self._reset()
 
         targets = list(targets)
@@ -225,17 +227,13 @@ class Executor:
                 evaluated, errors = self._execute_target(target)
                 if errors:
                     return self.finished, errors
-
             #elif self.are_dependencies_executed(resolved_target):
             # execute immediately. all dependencies are resolved.
             # all dependencies of target are already executed.
             #trace("Execute initial")
             #    self._execute_target(target)
             else:
-                # if not isinstance(target, TargetObject):
-                #     raise ValueError(f"Invalid target:{target}: {type(target)} {target!r}")
-
-                # add the depedencies of target first, in order
+                # add the dependencies of target first, in order
                 # add to waiting so we can fetch them later
                 if True:
                     # CODE DUPLICATION
@@ -268,6 +266,10 @@ class Executor:
                     #trace("Queue wait")
                     time.sleep(0.1)
 
+                if self.errors:
+                    debug("Execution had errors. Stopping")
+                    break
+
                 #target = self.waiting.pop(0)
                 target = self.waiting.popleft()
                 debug("Pop waiting %s: %s", target, target.key())
@@ -293,8 +295,6 @@ class Executor:
                         break
 
                     target = resolved_target
-                    #target =
-                    #assert target
 
                 if not target.requires:
                     # Target has no requirements, execute immediately.
@@ -308,13 +308,11 @@ class Executor:
                         target.name, Path(target.makex_file_path), target.location
                     )
                     if self.are_dependencies_executed(resolved_target):
-                        #print("!!!exec target", target)
                         evaluated, errors = self._execute_target(target)
                         if errors:
                             self.errors.extend(errors)
                             self.stop.set()
                     else:
-                        #print("make waiting again", target, target.requires)
                         # there may be errors during dependency checking
                         trace("Add back to waiting %r", target)
                         self.waiting.append(target)
@@ -504,15 +502,19 @@ class Executor:
                             checksum=checksum,
                         ))
             elif isinstance(node, Glob):
-                for path in resolve_glob(
-                    ctx, target, target_input_path, node, {ctx.output_folder_name}
-                ):
-                    checksum = self._checksum_file(path)
-                    seen.add(path)
-                    inputs.append(FileStatus(
-                        path=path,
-                        checksum=checksum,
-                    ))
+                try:
+                    for path in resolve_glob(
+                        ctx, target, target_input_path, node, {ctx.output_folder_name}
+                    ):
+                        checksum = self._checksum_file(path)
+                        seen.add(path)
+                        inputs.append(FileStatus(
+                            path=path,
+                            checksum=checksum,
+                        ))
+                except FileNotFoundError as e:
+                    raise PythonScriptError(f"Error finding files: {e}", node.location)
+
             elif isinstance(node, FindFiles):
                 # find(path, pattern, type=file|symlink)
                 if node.path:
@@ -526,14 +528,17 @@ class Executor:
                 i = 0
 
                 debug("Searching for files %s: %s", path, node.pattern)
-                for i, file in enumerate(resolve_find_files(ctx, target, path, node.pattern, ignore_names={ctx.output_folder_name})):
-                    trace("Checksumming input file %s", file)
-                    checksum = self._checksum_file(file)
-                    seen.add(file)
-                    inputs.append(FileStatus(
-                        path=file,
-                        checksum=checksum,
-                    ))
+                try:
+                    for i, file in enumerate(resolve_find_files(ctx, target, path, node.pattern, ignore_names={ctx.output_folder_name})):
+                        trace("Checksumming input file %s", file)
+                        checksum = self._checksum_file(file)
+                        seen.add(file)
+                        inputs.append(FileStatus(
+                            path=file,
+                            checksum=checksum,
+                        ))
+                except FileNotFoundError as e:
+                    raise PythonScriptError(f"Error finding files: {e}", node.location)
 
                 if i:
                     debug("Found %s files in %s", i, path)
@@ -691,9 +696,9 @@ class Executor:
                     #errors.append()
 
         #debug("Pre-eval requires %s", requires)
-        # Create a Evaluated target early, which we can pass to Runnables so they can easily create arguments (below).
+        # Create a Evaluated target early, which we can pass to Actions so they can easily create arguments (below).
         # XXX:
-        runnables = []
+        actions = []
         evaluated = EvaluatedTarget(
             name=target.name,
             path=target_output_path,
@@ -701,7 +706,7 @@ class Executor:
             inputs=inputs,
             outputs=outputs,
             # TODO: append these commands in a separate thread
-            runnables=runnables,
+            actions=actions,
             # use the existing requires list for performance
             # we don't need to copy/recreate here because they key/serialize the same
             requires=requires,
@@ -735,21 +740,18 @@ class Executor:
             raise err
 
         for command in target.commands:
-            # TODO: check we actually got a runnable
-
-            if isinstance(command, InternalRunnableBase) is False:
-                error("Got %s", type(command))
-
+            # TODO: check we actually got a Action
+            if isinstance(command, InternalActionBase) is False:
                 location = figure_out_location(command, target.location)
 
                 err = PythonScriptError(
-                    f"Invalid runnable in target {target}: {command!r}",
+                    f"Invalid action in target {target}: {command!r}",
                     location,
                 )
                 raise err
 
             arguments = command.transform_arguments(ctx, evaluated)
-            runnables.append(InternalRunnable(command, arguments))
+            actions.append(InternalAction(command, arguments))
 
         return evaluated
 
@@ -1002,9 +1004,6 @@ class Executor:
         # dirty checking applicable
         if target_dirty is False:
             self._mark_target_complete(evaluated, queued=False)
-            #key = target.key()
-            #if key in self.queued:
-            #    self.queued.remove(key)
             debug("Skipping target. Not dirty: %s", evaluated.key())
             return evaluated, None
 
@@ -1130,7 +1129,7 @@ class Executor:
                 # log unknown/unprintable
                 logging.exception(exc)
                 pass
-            #error("@@@@@@@@ERROR RUNNING TARGET: %s", result.exception())
+            #error("ERROR RUNNING TARGET: %s", result.exception())
             #traceback.print_exception(target.exception())
             self.errors.append(exc)
             self.stop.set()
@@ -1168,8 +1167,7 @@ class Executor:
             self._store_database(target)
 
     def _execute_target_thread(self, ctx: Context, target: EvaluatedTarget):
-
-        # this is run in a separate thread
+        # this is run in a separate thread...
         debug(f"Begin execution of target: {target} [thread={threading.current_thread().ident}]")
 
         ctx.ui.print(f"Execute target: {target.key()}")
@@ -1179,25 +1177,27 @@ class Executor:
         with ctx.new_environment() as subcontext:
             #context = ctx or subcontext
             context = subcontext
-            for command in target.runnables or []:
+            for command in target.actions or []:
                 debug(f"- Execute command (%s): %r", target.name, command)
 
                 if self.analysis_mode:
                     continue
 
                 if True:
-                    # XXX: right now we want errors from runnables to propagate outwards.
+                    # XXX: right now we want errors from Actions to propagate outwards.
                     #try:
                     execution = command(context, target)
 
                     if execution is None or execution.status is None:
-                        message = f"Runnable {command!r} did not return a valid output. Got {type(execution)}"
+                        message = f"Action {command!r} did not return a valid output. Got {type(execution)}"
                         raise ExecutionError(message, target, command.location or target.location)
 
-                    if execution.status != 0:
+                    trace("Execution return status: %s", execution)
+
+                    if execution.status not in {0, CORRECTED_RETURN_CODE}:
                         # \n\n {execution.output} \n\n {execution.error}
                         string = [
-                            f"Error running the runnable for target ",
+                            f"Error running the action for target ",
                             f"{brief_target_name(context, target, color=True)}:{target.location.line} (exit={execution.status}) \n",
                             f"\tThe process had an error and returned non-zero status code ({execution.status}). See above for any error output."
                         ]

@@ -41,7 +41,7 @@ toml configuration files are specified with sections. `makex` is the primary sec
          Changing this value may make your Makex files incompatible with others. It's best to not touch this unless you know what you are doing.
          This option may be removed in the future.
          
-       The shell that should be used when running the shell() runnable and anything else using a shell.
+       The shell that should be used when running the shell() action and anything else using a shell.
        
        Set to a string/path of the shell you want to use (e.g. `/bin/sh`).
        

@@ -39,7 +39,7 @@ class GenericFileLocation:
     column: int = None
 
 
-class GenericSyntaxError(Exception):
+class GenericSyntaxError(MakexError):
     def __init__(
         self, error: Union[str, Exception], location: GenericFileLocation, type, context=(1, 2)
     ):

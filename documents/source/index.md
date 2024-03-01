@@ -55,6 +55,7 @@
    proposals/targets-named-io
    proposals/workspaces-overlay
    comparison
+   how-it-works
    
 ```
 

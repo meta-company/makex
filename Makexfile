@@ -4,9 +4,10 @@ Note: This file must be run with the MAKEX_DEVELOPER environment variable to som
 
 """
 VENV = path("venv")
+VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions.
-VERSION = "20240203"
+VERSION = "20240301"
 
 target(
     name="hello-world",
@@ -44,7 +45,7 @@ target(
     ],
 )
 
-# stage a direcory for a source package
+# stage a directory for a source package
 target(
     name="source-package",
     requires=[
@@ -52,7 +53,7 @@ target(
         ":build-completions",
     ],
     runs=[
-        copy("python", exclude=[glob("**requirements*.txt"),glob("**pyproject.toml")]),
+        copy("python", exclude=[glob("**requirements*.txt"), glob("**pyproject.toml")]),
         copy("python/pyproject.toml"),
         sync(["documents/Makefile"]), # "documents/source"
         copy("Makexfile"),
@@ -73,13 +74,21 @@ target(
         ":venv",
     ],
     runs=[
-        shell(
-            f"source {VENV}/bin/activate",
-            f"python -m build {path('source-package')} --sdist --outdir {path('pypi')}",
-            # build the wheel from the source distribution.
-            # python -m build --wheel --outdir {path('pypi')} .
-            f"metacompany-twine {path('pypi')}/*",
-        )
+        #shell(
+        #    f"source {VENV}/bin/activate",
+        #    f"python -m build {path('source-package')} --sdist --outdir {path('pypi')}",
+        # build the wheel from the source distribution.
+        # python -m build --wheel --outdir {path('pypi')} .
+        #    f"metacompany-twine {path('pypi')}/*",
+        #),
+        execute(
+            VENV_BIN / "pyproject-build",
+            "--sdist",
+            "--outdir",
+            path('source-package'),
+            path('source-package')
+        ),
+        execute("metacompany-twine", path('pypi')),
     ],
 )
 
@@ -106,7 +115,7 @@ target(
             f"source {VENV}/bin/activate",
         ),
         execute(
-            f"{VENV}/bin/pex",
+            VENV_BIN / "pex",
             PEX_ARGS,
             "--output-file",
             home() / ".local/bin/makex",
@@ -133,16 +142,11 @@ target(
         VENV / "pyvenv.cfg",
     ],
     runs=[
-        shell(
-            # venv throws an error if it already exists or if it is a symlink. we need to use a subdirectory
-            # Error: Unable to create directory '...'
-            f"python3 -m venv --clear {VENV}",
-            f"source {VENV}/bin/activate",
-            f"{VENV}/bin/pip install --upgrade pip",
-            f"{VENV}/bin/pip install -r python/requirements.txt",
-            f"{VENV}/bin/pip install -r python/requirements-documents.txt",
-            f"{VENV}/bin/pip install -r python/requirements-build.txt",
-        ),
+        execute("python3.9", "-m", "venv", "--clear", VENV),
+        execute(VENV_BIN / "pip", "install", "--upgrade", "pip"),
+        execute(VENV_BIN / "pip", "install", "-r", "python/requirements.txt"),
+        execute(VENV_BIN / "pip", "install", "-r", "python/requirements-documents.txt"),
+        execute(VENV_BIN / "pip", "install", "-r", "python/requirements-build.txt"),
     ],
 )
 
@@ -179,17 +183,55 @@ target(
     # makex completions --print bash > ~/.local/share/bash-completion/completions/makex
 )
 
-
 target(
     name="test",
-    requires=[
-        ":venv"
-    ],
+    requires=[":venv"],
     runs=[
         shell(
             f"source {VENV}/bin/activate",
-            f"pytest -o cache_dir={path('test')}/pytest python"
+            f"pytest -o cache_dir={path('test')}/pytest python",
         )
+    ]
+)
 
+BUILD_NUITKA = path("nuitka")
+PYTHON_PACKAGE = "makex"
+APPLICATION_NAME = "makex"
+
+NUITKA_ARGS = []
+NUITKA_ARGS += [f"--include-package={PYTHON_PACKAGE}"]
+NUITKA_ARGS += [f"--report={BUILD_NUITKA}/nuitka-build-report.xml"]
+NUITKA_ARGS += ["--follow-imports", "--disable-console"]
+NUITKA_ARGS += [f"--output-dir={BUILD_NUITKA}"]
+NUITKA_ARGS += [f"--output-filename={APPLICATION_NAME}"]
+NUITKA_ARGS += [f"--include-package-data={PYTHON_PACKAGE}.data.completions"]
+NUITKA_ARGS += ["--python-flag=-O,nosite,no_docstrings"]
+NUITKA_ARGS += ["--show-anti-bloat-changes"]
+NUITKA_ARGS += ["--nofollow-import-to=*.tests"]
+NUITKA_ARGS += ["--nofollow-import-to=*_test.py"]
+NUITKA_ARGS += ["--nofollow-import-to=shtab"]
+NUITKA_ARGS += ["--nofollow-import-to=pytest"]
+NUITKA_ARGS += ["--standalone", "--onefile"]
+NUITKA_ARGS += ["--clang"]
+NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
+NUITKA_ARGS += ["--prefer-source-code"]
+NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
+# --linux-icon=ICON_PATH
+# --company-name=COMPANY_NAME
+# --macos-app-version=MACOS_APP_VERSION
+# --macos-app-icon=ICON_PATH
+# --enable-console (win/mac)
+# --python-flag static_hashes (do not give Python run time warnings)
+target(
+    name="nuitka",
+    requires=[
+        ":venv",
+    ],
+    runs=[
+        environment(
+            PYTHONPATH=source("python"),
+            CCFLAGS="-march=native -mtune=native -Os",
+        ),
+        execute(VENV_BIN / "nuitka3", NUITKA_ARGS, source("python/makex/__main__.py"))
     ]
 )

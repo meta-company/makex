@@ -114,3 +114,10 @@ else:
 
 # True to use builtin reflinks instead of reflinks pypi package
 BUILT_IN_REFLINKS = True
+
+# Ignore None arguments in various lists as they may be the result of a condition.
+# NOTE: This will likely be the default.
+IGNORE_NONE_VALUES_IN_LISTS = True
+
+# Enable Slice with target(). target[:"name"] target["path":"name"]
+TARGET_GETITEM_ENABLED = False

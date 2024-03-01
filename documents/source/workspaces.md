@@ -8,8 +8,8 @@ having to use relative paths (e.g the double dot marker (`..`)) or other mechani
 Targets can not reach out of their Workspace for dependencies (for example, using `//..`). 
 For that matter, the double dot operator is disabled entirely in Makex Paths.
 
-Usage of Workspaces is not required. If the Workspace is not defined, the root of the filesystem in the current working directory
-will be used as the path of the Workspace.
+Usage of Workspaces is not required. 
+If the Workspace is not defined, the root of the filesystem in the current working directory will be used as the path of the Workspace.
 
 Defining a Workspace is highly recommended.
 
@@ -56,7 +56,7 @@ A Workspace may be contained within another Workspace.
 
 This may be done by copying or [symbolically] linking the nested Workspace into its parent or container Workspace.  
 
-If a run crosses or enters a new Workspace, the Workspace is automatically detected and provided appropriately to the Runnables.
+If a run crosses or enters a new Workspace, the Workspace is automatically detected and provided appropriately to the Targets.
 
 The detection is made for each makex file inside a Workspace in the following order of precedence:
 

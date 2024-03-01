@@ -1,5 +1,5 @@
-(runnables)=
-# Creating Runnables
+(actions)=
+# Creating Actions
 
 TODO: This needs to be fleshed out more with argument processing.
 TODO: Most things are an extension of shell/execute, and/or may use copy/sync/etc.
@@ -11,9 +11,9 @@ Coming soon.
 
 ```python
 
-from makex.api.v1 import Runnable, run, Help
+from makex.api.v1 import Action, run, Help
 
-class CustomScript(Runnable):
+class CustomScript(Action):
     """
     Define a runnable named custom()
     """

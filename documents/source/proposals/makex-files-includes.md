@@ -5,21 +5,15 @@ in makex files to include the contents of another makex file.
 
 ```python
 
-include("//path/to/file.makex")
+include("//path/to/file.makex", optional=True)
 
-
-function()
 ```
 
 //path/to/file.makex:
 
 ```python
 
-
-def function():
-    target(
-        
-    )
+# Common targets and macros defined here.
 ```
 
 ## Applications
@@ -35,8 +29,7 @@ def function():
 
 ## Considerations
 
-
 - We may want to expose a better api for user constructed targets/functions/macros.
   - eg. `export_macro()`, `export_target_type()`
   - Include might not be the right name for this; `load()` might be better.
-- Recursive includes are probably unnecessary.
+- Recursive includes are probably unnecessary (or not recommended).

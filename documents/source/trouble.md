@@ -56,6 +56,14 @@ Makex prefixes any errors written to standard output by subprocesses with `ERROR
 
 If you don't want to see these messages, address the warnings, use a flag to quiet, or improve the executable you are trying to run.
 
+### Makex seems slow handling large files
+
+Makex generates checksums of input/output files. At the moment, this is currently done in a single process. 
+
+It's usually best to just wait for the file hashing to complete for the set of input files.
+
+You may omit large output files from the Target's outputs and this will prevent hashing.
+
 ### Makex hangs while running a command
 
 NOTE: If a shell/execute/command waits for input, Makex will hang. This is by design. 

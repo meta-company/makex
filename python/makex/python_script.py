@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import (
     Any,
     BinaryIO,
-    Protocol,
+    Protocol, Union,
 )
 
 LOGGER = logging.getLogger("python-script")
@@ -51,6 +51,14 @@ class FileLocation:
             return f"FileLocation({self.line}, {self.column}, \"{self.path}\")"
         else:
             return f"FileLocation({self.line}, {self.column})"
+
+    @classmethod
+    def from_ast_node(self, node: ast, path: str):
+        return FileLocation(
+            line=node.lineno,
+            column=node.col_offset,
+            path=path,
+        )
 
 
 class ScriptCallable:
@@ -164,8 +172,8 @@ class StringValue(str):
 class DisableImports(ast.NodeVisitor):
     # TODO: disable imports
 
-    def __init__(self, path: Path):
-        self.path = path.as_posix()
+    def __init__(self, path: PathLike):
+        self.path = path
 
     def visit_Import(self, node):
         print(
@@ -175,7 +183,7 @@ class DisableImports(ast.NodeVisitor):
         )
         raise PythonScriptError(
             "Invalid syntax (Imports are not allowed):",
-            FileLocation(node.lineno, node.col_offset, self.path)
+            FileLocation.from_ast_node(node, self.path)
         )
 
     def visit_ImportFrom(self, node):
@@ -186,7 +194,7 @@ class DisableImports(ast.NodeVisitor):
         )
         raise PythonScriptError(
             "Invalid syntax (Imports are not allowed):",
-            FileLocation(node.lineno, node.col_offset, self.path)
+            FileLocation.from_ast_node(node, self.path)
         )
 
 
@@ -208,6 +216,61 @@ def _create_file_location_call(path, line, column):
         col_offset=column,
     )
     return file_location_call
+
+
+class _DisableAssignments(ast.NodeVisitor):
+    """
+    Disable assignments:
+    - to anything non-script (globals)
+    - to specified variables.
+
+    a,b = item
+    a,*b = it
+
+    del a
+
+    a = 1
+    """
+    def __init__(self, path: PathLike, names: set = None):
+        self.path = str(path)
+        self.names = names or set()
+
+    def check_name(self, node, name):
+        if name in self.names:
+            raise PythonScriptError(
+                f"Can't assign to the name '{name}'. Please rename the variable to something else.",
+                location=FileLocation.from_ast_node(node, self.path),
+            )
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> Any:
+        # (walrus)
+        if isinstance(node.target, ast.Name):
+            self.check_name(node, node.target.id)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
+        #AnnAssign; assignments with type expressions
+        if isinstance(node.target, ast.Name):
+            self.check_name(node, node.target.id)
+
+    def visit_Assign(self, node: ast.Assign) -> Any:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self.check_name(node, target.id)
+            elif isinstance(target, ast.Tuple):
+                for element in target.elts:
+                    if isinstance(element, ast.Name):
+                        self.check_name(element, element.id)
+        """
+         the following expression can appear in assignment context
+
+         | Attribute(expr value, identifier attr, expr_context ctx)
+         | Subscript(expr value, expr slice, expr_context ctx)
+         | Starred(expr value, expr_context ctx)
+         | Name(identifier id, expr_context ctx)
+         | List(expr* elts, expr_context ctx)
+         | Tuple(expr* elts, expr_context ctx)
+
+        """
 
 
 class _TransformStringValues(ast.NodeTransformer):
@@ -469,6 +532,7 @@ class PythonScriptFile:
         self._env = env
         self.path = str(path)
         self.globals = globals or {}
+        self.disable_assignment_names = set()
         # transform attribute calls to have line/column information
 
     def _ast_parse(self, f: BinaryIO):
@@ -479,19 +543,33 @@ class PythonScriptFile:
         tree = ast.parse(buildfile_contents, filename=self.path, mode='exec')
         return tree
 
-    def execute(self, file: BinaryIO):
-        try:
-            tree = self._ast_parse(file)
-        except SyntaxError as e:
-            exc_type, exc_message, exc_traceback = sys.exc_info()
-            l = FileLocation(e.lineno, e.offset, self.path)
-            raise PythonScriptError(e, location=l) from e
+    def set_disabled_assignment_names(self, names: set):
+        self.disable_assignment_names = names
+
+    def execute(self, file: Union[BinaryIO, ast.AST]):
+        if isinstance(file, ast.AST):
+            # TODO: use hasattr(file, "read") instead of isinstance
+            tree = file
+        else:
+            try:
+                tree = self._ast_parse(file)
+            except SyntaxError as e:
+                exc_type, exc_message, exc_traceback = sys.exc_info()
+                l = FileLocation(e.lineno, e.offset, self.path)
+                raise PythonScriptError(e, location=l) from e
 
         scope = self._env.globals()
         scope.update(self.globals)
 
         # set of names to ignore
         ignore = {STRING_VALUE_NAME, FILE_LOCATION_NAME, LIST_VALUE_NAME}
+
+        # Catch some early errors
+        t = DisableImports(self.path)
+        t.visit(tree)
+
+        t = _DisableAssignments(self.path, self.disable_assignment_names)
+        t.visit(tree)
 
         # XXX: calls should be transformed first
         t = _TransformCallsToHaveFileLocation(ignore, self.path)

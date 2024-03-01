@@ -11,6 +11,8 @@ from threading import local
 
 from makex.protocols import CommandOutput
 
+CORRECTED_RETURN_CODE = object()
+
 _QUEUE = deque()
 
 
@@ -23,7 +25,7 @@ def is_exe(path):
 
 
 def check_exec(path):
-    if not is_exe(path):
+    if is_exe(path) is False:
         raise Exception(f"Command is not executable: {path}. Fix this with chmod +x {path}")
 
 
@@ -107,15 +109,16 @@ def run(
             errors = None
             tail_out(sel, p)
 
-        returnCode = p.poll()
+        return_code = p.poll()
 
         _thread_local.process = None
 
         _QUEUE.remove(p.pid)
         # XXX: For some reason this was returning None when everything was actually ok. (on linux,el8)
-        if returnCode is None:
-            returnCode = 0
-        return CommandOutput(returnCode, outputs, errors)
+        if return_code is None:
+            return_code = CORRECTED_RETURN_CODE
+
+        return CommandOutput(return_code, outputs, errors)
 
 
 def tail_out(sel, p, enable_output=True, color_error="", color_escape=""):
@@ -133,7 +136,6 @@ def tail_out(sel, p, enable_output=True, color_error="", color_escape=""):
                     )
                 yield data, None
             else:
-                #print(data, end="", file=sys.stderr)
                 if enable_output:
                     print(
                         f"{color_error}ERROR OUTPUT:{color_escape} {data}",

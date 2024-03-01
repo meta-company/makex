@@ -2,9 +2,11 @@ from pathlib import Path
 
 from makex.context import Context
 from makex.errors import ExecutionError
-from makex.make_file import (
+from makex.makex_file import (
     MakexFileCycleError,
     ResolvedTargetReference,
+)
+from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
 )
@@ -124,7 +126,6 @@ def test_nested_workspaces_error(tmp_path: Path):
     makefile_path_b = workspace_b / "Makexfile"
     makefile_path_b.write_text("""target("b", requires=["//..:b"])""")
 
-
     ctx = Context()
     ctx.workspace_object = Workspace(tmp_path)
     graph = TargetGraph()
@@ -165,5 +166,3 @@ def test_nested_workspaces(tmp_path: Path):
     assert len(a.requires)
     assert not result.errors
     #assert a.requires == [ResolvedTargetReference("b", "//nested")]
-
-

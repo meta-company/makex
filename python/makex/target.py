@@ -38,11 +38,11 @@ class TargetBase(ABC):
         #return format_hash_key(self.name, self.path)
 
 
-class Runnable(Protocol):
+class Action(Protocol):
     location: FileLocation
 
     def __call__(self, ctx: Context, target: "EvaluatedTarget") -> CommandOutput:
-        # old runnable function
+        # old Action function
         ...
 
     def run_with_arguments(
@@ -51,41 +51,41 @@ class Runnable(Protocol):
         ...
 
     def hash(self, ctx: Context, arguments: dict[str, Any], hash_function: StringHashFunction):
-        # allow runnables to produce a hash of their arguments
+        # allow Actions to produce a hash of their arguments
         # if anything about them changes (e.g. arguments/inputs/checksums) the hash should change
         return
 
 
-class InternalRunnable:
+class InternalAction:
     """
-    Keep an Internal runnable that records the arguments evaluated from a runnable,
-    so we can hash the runnable before running it.
+    Keep an Internal Action that records the arguments evaluated from a Action,
+    so we can hash the Action before running it.
 
-    Keep a pointer to the original runnable as it's unnecessary to copy it.
+    Keep a pointer to the original Action as it's unnecessary to copy it.
     """
-    def __init__(self, runnable: Runnable, arguments: dict[str, Any]):
-        self.runnable = runnable
+    def __init__(self, action: Action, arguments: dict[str, Any]):
+        self.action = action
         self.arguments = arguments
 
     @property
     def location(self):
-        return self.runnable.location
+        return self.action.location
 
     def hash(self, ctx: Context, hash_function: StringHashFunction):
-        assert hasattr(self.runnable, "hash")
-        assert callable(self.runnable.hash)
+        assert hasattr(self.action, "hash")
+        assert callable(self.action.hash)
 
-        return self.runnable.hash(ctx=ctx, arguments=self.arguments, hash_function=hash_function)
+        return self.action.hash(ctx=ctx, arguments=self.arguments, hash_function=hash_function)
 
     def __call__(self, ctx, target: "EvaluatedTarget") -> CommandOutput:
 
-        if getattr(self.runnable, "run_with_arguments", None):
-            return self.runnable.run_with_arguments(ctx, target, self.arguments)
+        if getattr(self.action, "run_with_arguments", None):
+            return self.action.run_with_arguments(ctx, target, self.arguments)
         else:
-            return self.runnable(ctx, target)
+            return self.action(ctx, target)
 
     def __repr__(self):
-        return f"InternalRunnable({self.runnable!r}, {self.arguments})"
+        return f"InternalAction({self.action!r}, {self.arguments})"
 
 
 class Hasher:
@@ -130,7 +130,7 @@ class EvaluatedTarget(TargetBase):
 
     requires: list["EvaluatedTarget"] = None
 
-    runnables: list[InternalRunnable] = None
+    actions: list[InternalAction] = None
 
     # Contains the file path and location which the target was defined.
     location: FileLocation = None
@@ -186,10 +186,10 @@ class EvaluatedTarget(TargetBase):
             if self.makex_file.enviroment_hash:
                 data.append(f"environment:{self.makex_file.enviroment_hash}")
 
-        if self.runnables:
-            for command in self.runnables:
+        if self.actions:
+            for command in self.actions:
                 data.append(
-                    f"command:{command.runnable.__class__.__name__}:{command.hash(ctx, hash_function=hash_function)}"
+                    f"command:{command.action.__class__.__name__}:{command.hash(ctx, hash_function=hash_function)}"
                 )
 
         # XXX: Run recursively.

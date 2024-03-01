@@ -46,9 +46,10 @@ The name of a file can be specified absolutely.
 The list of files to check can be specified on the {option}`command line<makex --makex-file-names>` or configuration file.
 --> 
 
-If several of these files exist in a directory, they will be searched in the order specified. They will be tested, in order, for a 
-magic marker to see if they are a Makex file and the first Makex-looking file will be parsed.
+If several of these files exist in a directory, they will be searched in the order specified. 
 
+<!-- They will be tested, in order, for a 
+magic marker to see if they are a Makex file and the first Makex-looking file will be parsed. -->
 
 ## Magic marker/Hashbang/Shebang
 
@@ -131,7 +132,7 @@ The target function is defined as follows:
   :param list[PathLike] requires: A list of requrements. Can be files or other targets using a target specifier, or using the `Target` function.
     A string with a : will be parsed as a target. Any values which evaluated to None will be skipped.
   
-  :param list[Runnable] runs: A list of :ref:`runnables`. The are actions/task/executables/scripts to run as part of the target.
+  :param list[Action] runs: A list of :ref:`actions`. These are actions/task/executables/scripts to run to produce the target.
   
   :param list[PathLike] outputs: A list of the files this target outputs. If a target produces any files that are to be consumed by any dependendants of the target, they *should* be defined here. 
     Defining outputs makes the target a candidate for caching.
@@ -229,19 +230,10 @@ If `DIRECT_REFERENCES_TO_MAKEX_FILES` is enabled, the `path` argument may be a p
 ```
 
 
-### Runnables
+### Actions
 
-Each target can accept a list of "Runnables". These are a list of things that will be run when the target is executed.
+Each target can accept a list of "Actions" that will be run when the target is executed.
 
-#### print()
-
-```{eval-rst}
-.. py:function:: print(message)
-  
-  Print a message to standard output.
-  
-  :param String message: The message to print.
-```
 
 #### copy()
 
@@ -267,8 +259,56 @@ Each target can accept a list of "Runnables". These are a list of things that wi
   :param PathLike destination: The destination. May be a path relative to the target output path, or an absolute path.
 ```
 
-#### execute()
+The copy function has 8 forms:
 
+```python
+
+# copy a file to the Target output
+copy(file)
+
+# copy a file to specified file path.
+copy(file, file)
+
+# copy a list of files to the Target output
+copy(files)
+
+# copies a set of files to the specified folder.
+copy(files, folder)
+
+# copy a folder to the Target output
+copy(folder)
+
+# allows renaming or mirroring a folder.
+copy(folder, folder)
+
+# copy a list of folders to the Target output
+copy(folders) 
+
+# copies a set of folders to the specified folder..
+copy(folders, folder) 
+
+```
+
+
+#### environment()
+
+
+```{eval-rst}
+.. py:function:: environment(dictionary, **arguments)
+  
+  Set the environment of future actions.
+  
+  You may pass a dictionary and/or keyword arguments. Using keyword arguments is preferred.
+  
+  All values must be String or String-like values. String-like values include Path objects. Integers will be converted
+  to strings.
+  
+  :param Optional[dict[str,str]] dictionary: A dictionary of names pointing to values for the environment.
+  :param str arguments: Names and values to use for the environment.
+```
+
+
+#### execute()
 
 ```{eval-rst}
 .. py:function:: execute(*executable:Union[str|PathLike,list[str|PathLike]])
@@ -296,18 +336,17 @@ Each target can accept a list of "Runnables". These are a list of things that wi
   Typically, this means passing each argument and value as a separate string.
 ```
 
-#### write()
 
+#### print()
 
 ```{eval-rst}
-.. py:function:: write(file:PathLike, data:Union[str,list[str]], executable:bool=False)
+.. py:function:: print(message)
   
-  Writes `data` to `file`.
+  Print a message to standard output.
   
-  :param PathLike file: The destination file. May be a Workspace path, an absolute path, or relative path within the Target's output path.
-  :param Union[str,list[str]] data: The data to write, may be a list of strings which will be concatenated.
-  :param bool executable: Ensure the file is executable.
+  :param String message: The message to print.
 ```
+
 
 #### shell()
 
@@ -346,6 +385,20 @@ Each target can accept a list of "Runnables". These are a list of things that wi
   
     The syntax of the script depends on the system's shell.
     Variables are expanded according the specified shell's rules. 
+```
+
+
+#### write()
+
+
+```{eval-rst}
+.. py:function:: write(file:PathLike, data:Union[str,list[str]], executable:bool=False)
+  
+  Writes `data` to `file`.
+  
+  :param PathLike file: The destination file. May be a Workspace path, an absolute path, or relative path within the Target's output path.
+  :param Union[str,list[str]] data: The data to write, may be a list of strings which will be concatenated.
+  :param bool executable: Ensure the file is executable.
 ```
 
 

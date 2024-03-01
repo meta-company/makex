@@ -41,8 +41,8 @@ FIND_IN_INPUTS_ENABLED = _get_bool("FIND_IN_INPUTS_ENABLED", True)
 # Enable glob functions in the Target inputs list.
 GLOBS_IN_INPUTS_ENABLED = _get_bool("GLOBS_IN_INPUTS_ENABLED", True)
 
-# Enable globs in various arguments to runnables.
-GLOBS_IN_RUNNABLES_ENABLED = _get_bool("GLOBS_IN_RUNNABLES_ENABLED", DEVELOPMENT_ENABLED)
+# Enable globs in various arguments to Actions.
+GLOBS_IN_ACTIONS_ENABLED = _get_bool("GLOBS_IN_ACTIONS_ENABLED", DEVELOPMENT_ENABLED)
 
 # enable feature for variants of outputs
 VARIANTS_ENABLED = _get_bool("VARIANTS_ENABLED", False)
@@ -75,6 +75,10 @@ NAMED_OUTPUTS_ENABLED = False
 # Enable this in dev mode because we know what we want.
 # Disable for public because it can really footgun (cyclical deps).
 ENABLE_PATH_TO_STRING = _get_bool("ENABLE_PATH_TO_STRING", DEVELOPMENT_ENABLED)
+
+# Enable setting of target path.
+# We will likely set this to False by default.
+TARGET_PATH_ENABLED = _get_bool("TARGET_PATH_ENABLED", True)
 
 # Strict mode
 # - Disable the shell (unless really explicit)
