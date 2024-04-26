@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Iterable,
+    Optional,
     Union,
 )
 
@@ -158,29 +159,18 @@ class WorkspaceCache:
 
         directory_parts = directory.parts
         workspace = self._get(directory_parts)
-
         if workspace is not None:
             return workspace
 
         # search upwards for a WORKSPACE file
-        # do the key matching faster by expanding directory.parts into Iterable[tuple[str,...]]
-        def iterate_parents(parts: tuple[str]) -> Iterable[tuple[str, ...]]:
-            all_parts = parts
-            i = len(parts)
-            #print(f"all parts{all_parts}")
-            while i >= 0:
-                #print(f"Yield {all_parts[:i]} {i}")
-                yield all_parts[0:i]
-                i -= 1
-
+        # do the key matching faster by expanding directory.parts into Iterable[tuple[str,...]] using _iterate_parents
         exists = os.path.exists
-        for parent_key in iterate_parents(directory_parts):
+        for parent_key in _iterate_parents(directory_parts):
             test = self._get(parent_key)
 
             if test is not None:
                 # found a workspace in parent
                 return test
-
             ## check for workspace file if we haven't
             #test = Path(*parent_key) / WORKSPACE_FILE_NAME
             if len(parent_key) == 1:
@@ -197,7 +187,7 @@ class WorkspaceCache:
                 self._cache[parent_key] = workspace
 
                 # cache everything from directory -> workspace
-                for key in iterate_parents(directory_parts):
+                for key in _iterate_parents(directory_parts):
                     if key == parent_key:
                         break
                     self._cache[key] = workspace
@@ -211,11 +201,19 @@ class WorkspaceCache:
         return Workspace(_find_root(directory))
 
 
+def _iterate_parents(parts: tuple[str]) -> Iterable[tuple[str, ...]]:
+    all_parts = parts
+    i = len(parts)
+    while i >= 0:
+        yield all_parts[0:i]
+        i -= 1
+
+
 def current_workspace(
     cwd,
     files: ConfigurationFiles = None,
     argument=None,
-    environment: str = None,
+    environment: Optional[Path] = None,
 ):
     iterable = detect_workspaces(
         cwd,
@@ -249,8 +247,8 @@ def which_workspace(
 def detect_workspaces(
     cwd: Path,
     files: ConfigurationFiles,
-    argument: Path = None,
-    environment: Path = None,
+    argument: Optional[Path] = None,
+    environment: Optional[Path] = None,
 ) -> Iterable[Detection]:
     """ Return the currently detected workspaces from the given arguments/state.
 

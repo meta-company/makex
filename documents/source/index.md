@@ -30,7 +30,7 @@
    
    makex-files
    configuration
-   targets
+   tasks
    workspaces
    checksums
    caching
@@ -50,9 +50,9 @@
    authors
    history
    proposals/makex-files-includes
-   proposals/targets-generating
-   proposals/targets-iterable-run-list
-   proposals/targets-named-io
+   proposals/tasks-generating
+   proposals/tasks-iterable-run-list
+   proposals/tasks-named-io
    proposals/workspaces-overlay
    comparison
    how-it-works

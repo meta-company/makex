@@ -109,7 +109,7 @@ def run(
             errors = None
             tail_out(sel, p)
 
-        return_code = p.poll()
+        return_code = p.wait()
 
         _thread_local.process = None
 

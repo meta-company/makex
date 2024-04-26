@@ -2,17 +2,17 @@
 
 ## File
 
-The Makex configuration file allows one to override some aspects of makex. A configuration file is not required for basic
-use of Makex.
+The Makex configuration file allows one to override some aspects of makex. 
+A configuration file is not required for basic use of Makex.
 
 The configuration file itself may be located in a number of places:
 
 - In the current working directory or its parents (as `makex.toml` or `.makex.toml`).
-- The users configuration directory (`~/.config/makex.toml`).
+- The user's configuration directory (`~/.config/makex.toml`).
 - The global/system configuration directory (`/etc/makex.toml`)
 
-All of these places are checked in order, and the configuration is merged with the same precedence.
-For example, this means that the a `make.toml` in the current working directory overrides any values in the users or global.
+These locations are checked in order, and the configuration is merged with the same precedence.
+For example, this means that a `make.toml` in the current working directory overrides any values in the users or global.
 
 ## Sections
 
@@ -91,7 +91,7 @@ toml configuration files are specified with sections. `makex` is the primary sec
          
          The list of these things include common cache/test folders (e.g. `.venv`, `__pycache__`, `.pytest_cache`),
          repository folders (e.g. `.hg` or `.git`), files typically not included in outputs (`*.pyc`) and any
-         target output folders (named `_output_`).
+         task output folders (named `_output_`).
        
             
 

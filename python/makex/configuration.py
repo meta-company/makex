@@ -32,7 +32,7 @@ class ConfigurationError(MakexError):
         self.location = location
 
 
-class ConfigurationStringValue(str):
+class ConfigurationValue:
     """
         Track string value locations because they are usually a source of problems, and we want to refer to that location
         for the user.
@@ -45,8 +45,8 @@ class ConfigurationStringValue(str):
     #def __str__(self):
     #    return self.value
 
-    def __new__(cls, *args, **kwargs):
-        return super().__new__(cls, args[0])
+    #def __new__(cls, *args, **kwargs):
+    #    return super().__new__(cls, args[0])
 
 
 @dataclass
@@ -97,9 +97,8 @@ class Configuration:
         environment = root.get("environment", {})
 
         environment = {
-            k: ConfigurationStringValue(v, GenericFileLocation(path))
-            for k,
-            v in environment.items()
+            k: ConfigurationValue(v, GenericFileLocation(path))
+            for k, v in environment.items()
         }
         return cls(
             path=path,
@@ -181,30 +180,43 @@ def evaluate_configuration_environment(
 ) -> dict[str, str]:
     d = {}
     for k, v in env.items():
-        if v.startswith(SHELL_MARKER):
-            script = v[len(SHELL_MARKER):]
+        value = v.value
 
-            read, write = os.pipe()
-            os.write(write, script.encode("utf-8"))
-            os.close(write)
+        if isinstance(value, dict):
+            script = value.get("shell", None)
+            if script is not None:
 
-            process = run(
-                shell,
-                env=current_enviroment,
-                capture=True,
-                shell=False,
-                print=False,
-                cwd=cwd,
-                stdin=read,
-            )
-            if process.status != 0:
-                location: GenericFileLocation = getattr(v, "location", None)
-                raise ConfigurationError(
-                    f"Invalid shell command when evaluating environment variables from the file {location.path}.",
-                    location=location
+                read, write = os.pipe()
+                os.write(write, script.encode("utf-8"))
+                os.close(write)
+                print(shell, script)
+                process = run(
+                    shell,
+                    env=current_enviroment,
+                    capture=True,
+                    shell=False,
+                    print=False,
+                    cwd=cwd,
+                    stdin=read,
                 )
-            # XXX: newline is removed so paths evaluate easy
-            v = process.output.strip("\n")
+                if process.status != 0:
+                    location: GenericFileLocation = getattr(v, "location", None)
+                    raise ConfigurationError(
+                        f"Invalid shell command when evaluating environment variables from the file {location.path}:\n\t{value}\n:{process.output}\n{process.error}",
+                        location=location
+                    )
+                # XXX: newline is removed so paths evaluate easy
+                v = process.output.strip("\n")
+        elif isinstance(value, str):
+            pass
+        elif isinstance(value, bool):
+            value = "1" if value else "0"
+        else:
+            raise ConfigurationError(
+                f"Invalid environment variable value type {type(value)} for {k} when evaluating environment variables from the file {value.location.path}:\n\t{v}",
+                location=value.location
+            )
+
         d[k] = v
 
     return d

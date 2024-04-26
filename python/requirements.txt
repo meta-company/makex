@@ -1,4 +1,0 @@
-# this file is kept for development purposes
-progressbar2>=4.3.2
-toml>=0.10.2
-#xattr>=1.0.0

@@ -1,11 +1,20 @@
-import logging
 from typing import Protocol
 
-from makex._logging import (
-    BOLD_SEQ,
-    COLOR_SEQUENCS,
-    RESET_SEQ,
-)
+# These are the sequences need to get colored output
+RESET = "\033[0m"
+_COLOR_TEMPLATE = "\033[1;%dm"
+BOLD = "\033[1m"
+
+_BLACK, _RED, _GREEN, _YELLOW, _BLUE, _MAGENTA, _CYAN, _WHITE = [30 + r for r in range(8)]
+
+BLACK = _COLOR_TEMPLATE % _BLACK
+RED = _COLOR_TEMPLATE % _RED
+YELLOW = _COLOR_TEMPLATE % _YELLOW
+GREEN = _COLOR_TEMPLATE % _GREEN
+CYAN = _COLOR_TEMPLATE % _CYAN
+BLUE = _COLOR_TEMPLATE % _BLUE
+MAGENTA = _COLOR_TEMPLATE % _MAGENTA
+WHITE = _COLOR_TEMPLATE % _WHITE
 
 
 class ColorsNames(Protocol):
@@ -19,14 +28,14 @@ class ColorsNames(Protocol):
 
 
 class Colors:
-    MAKEX = COLOR_SEQUENCS[logging.DEBUG] + BOLD_SEQ
-    ERROR = COLOR_SEQUENCS[logging.ERROR] + BOLD_SEQ
-    INFO = COLOR_SEQUENCS[logging.INFO] + BOLD_SEQ
-    WARNING = COLOR_SEQUENCS[logging.WARNING] + BOLD_SEQ
-    CRITICAL = COLOR_SEQUENCS[logging.CRITICAL] + BOLD_SEQ
+    MAKEX = GREEN + BOLD
+    ERROR = RED + BOLD
+    INFO = WHITE + BOLD
+    WARNING = YELLOW + BOLD
+    CRITICAL = RED + BOLD
 
-    RESET = RESET_SEQ
-    BOLD = BOLD_SEQ
+    RESET = RESET
+    BOLD = BOLD
 
 
 class NoColors:

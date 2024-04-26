@@ -2,10 +2,10 @@
 
 Workspaces define the roots or boundaries of projects or a repository.
 
-Workspaces use the special `//` prefix marker in paths to easily refer to targets consistently without 
+Workspaces use the special `//` prefix marker in paths to easily refer to tasks consistently without 
 having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
 
-Targets can not reach out of their Workspace for dependencies (for example, using `//..`). 
+Tasks can not reach out of their Workspace for dependencies (for example, using `//..`). 
 For that matter, the double dot operator is disabled entirely in Makex Paths.
 
 Usage of Workspaces is not required. 
@@ -46,7 +46,7 @@ The current Workspace is detected with the following order of precedence:
 
 <!-- The {data}`makex.workspace<TOML.makex.workspace>` setting in Makex Configuration Files from the current working directory or one of the parents.
 
-## Referring to Targets in a Workspace
+## Referring to Tasks in a Workspace
 
 The prefix marker `//` is used to denote a Workspace path.
 
@@ -56,7 +56,7 @@ A Workspace may be contained within another Workspace.
 
 This may be done by copying or [symbolically] linking the nested Workspace into its parent or container Workspace.  
 
-If a run crosses or enters a new Workspace, the Workspace is automatically detected and provided appropriately to the Targets.
+If a run crosses or enters a new Workspace, the Workspace is automatically detected and provided appropriately to the Tasks.
 
 The detection is made for each makex file inside a Workspace in the following order of precedence:
 
@@ -70,5 +70,5 @@ The current Workspace detection algorithm doesn't apply to nested/named Workspac
 - The {option}`--workspace<makex --workspace>` command line argument.
 - The {data}`makex.workspace<TOML.makex.workspace>` setting in Makex Configuration Files from one of the parents of the current working directory.
 - The {data}`makex.workspace<TOML.makex.workspace>` setting in of the global Makex Configuration Files (`~/.config/makex.toml` or `/etc/makex.toml`) 
-- The root/anchor of the "current" directory. The current directory is the path of the target's Makex file. 
+- The root/anchor of the "current" directory. The current directory is the path of the task's Makex file. 
 -->

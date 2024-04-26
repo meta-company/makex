@@ -1,15 +1,15 @@
 # Proposal: Named Inputs and Outputs
 
+In some cases, Targets may provide multiple named outputs (e.g. `.css` and `.css.map` files).
+
+Some targets may be written and understood more clearly if the input files have names/alias.
+
 TODO: we may need an explicit inputs keyword argument to target to clear things up.
-TODO: Do we need separate namespaces for outputs/inputs files?
 TODO: Retrieving inputs/outputs without a name specified should either [] or all inputs/outputs.
-TODO: Retreive unnamed inputs/outputs.
-TODO: Does referring to another target create an implicit dependency? (probably yes). 
+TODO: Do we need separate namespaces for outputs/inputs files? (probably yes)
+TODO: Does referring to another target create an implicit dependency? (probably yes, configurable). 
 
-
-
-
-## Function for referring to named inputs/outputs
+## Function for referring to named/anonymous inputs/outputs
 
 ```python
 
@@ -29,7 +29,7 @@ Target("hello").outputs
 target[name:path].outputs
 
 # Explicit function handling both inputs/ouputs
-Target(name, path, output=None, input=None) # refers to target output path, or specific output
+Target(name, path, outputs=None, inputs=None) # refers to target output path, or specific output
 
 # simple and explicit
 # outputs() function
@@ -38,13 +38,17 @@ outputs("path:target", *names:str|set) # path:target shorthand
 outputs(":target", *names:str|set) # local target shorthand
 outputs("target", "path", *names:str|set) # explicit target/path; this syntax won't work with the others.
 outputs_of(target)
-# inputs() function (same as inputs)
+# inputs() function (same as outputs)
 inputs(target_reference, *names)
 
 # unified namespace
 # cons: which files, outputs or inputs?
 files(target_reference, *names)
 
+
+# implicitly
+# anytime a target reference is passed into inputs or actions, refer to its outputs
+# executes that receive a dictionary shall flatten the values out as arguments.
 ```
 
 
@@ -70,7 +74,7 @@ For example:
 
 target(
   name="hello",
-  runs=[
+  steps=[
       write(output("file"), "hello"),
   ],
   outputs=[
@@ -85,7 +89,7 @@ target(
 
 target(
   name="world",
-  runs=[
+  steps=[
       write(output("file"), "world"),
   ],
   outputs=[
@@ -113,7 +117,7 @@ target(
 
 target(
   name="hello-world",
-  runs=[
+  steps=[
       # copies hello.txt and world.txt into the target output
       copy(Target("hello").outputs.get("file")),
       copy(Target("world").outputs.get("file")),
@@ -121,6 +125,9 @@ target(
       # or (*outputs* of):
       copy(outputs("hello", name="file")), # or name:set = {"file"}
       copy(outputs("world", name="file")), # or name:set = {"file"}
+      
+      # implicit all outputs or singular
+      copy(Target("hello"))
   ]
 )
 
@@ -135,7 +142,7 @@ target(
         named("source", outputs("target", name="")),
         input("source", outputs("")),
     ],
-    runs=[
+    steps=[
         # later ... to copy those outputs
     ]
   )
@@ -162,6 +169,9 @@ target(
         "name": "hello-world.txt",
         # referring to the inputs/outputs of another target:
         "external": target[path:name].outputs['name'],
+        
+        # implicitly, all outputs or singular
+        "external": target[path:name],
     },
     requires=[
         # all bad ideas:
@@ -175,13 +185,14 @@ target(
         # or:
         requirement("name", target)
     ],
-    runs=[
+    steps=[
         copy(input("name")),
         copy(target.requires["name"]),
         copy(target.inputs["name"]),
         copy(self.requires["name"]),
         copy(self.inputs["name"]),
         copy(requirement("name")),
+        copy(input[name:path]),
     ]
 )
 ```

@@ -86,7 +86,7 @@ def create_output_path(new_path: Path, linkpath: Path=None, fix=False):
     if linkpath.exists():
         if not linkpath.is_symlink():
             raise Exception(
-                f"Linkpath {linkpath} exists, but it is not a symlink. Output directory may have been created inadvertantly outside the tool."
+                f"Linkpath {linkpath} exists, but it is not a symlink. Output directory may have been created inadvertently outside the tool."
             )
     else:
         if linkpath.exists() is False and linkpath.is_symlink():
@@ -465,7 +465,7 @@ def _create_output_path(args):
         if linkpath.exists():
             if not linkpath.is_symlink():
                 raise Exception(
-                    f"Linkpath {linkpath} exists, but it is not a symlink. Build directory may have been created inadvertantly outside the use of build-tool."
+                    f"Linkpath {linkpath} exists, but it is not a symlink. Build directory may have been created inadvertently outside the use of build-tool."
                 )
         else:
             linkpath.symlink_to(source_path)

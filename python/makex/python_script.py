@@ -11,26 +11,32 @@ import ast
 import logging
 import sys
 import traceback
+import types
 from abc import (
     ABC,
     abstractmethod,
 )
 from collections import deque
 from copy import copy
+from importlib.machinery import ModuleSpec
 from io import StringIO
 from os import PathLike
 from pathlib import Path
 from typing import (
     Any,
     BinaryIO,
-    Protocol, Union,
+    Optional,
+    Protocol,
+    Union,
 )
 
 LOGGER = logging.getLogger("python-script")
 STRING_VALUE_NAME = "_STRING_"
 LIST_VALUE_NAME = "_LIST_"
+GLOBALS_NAME = "_GLOBALS_"
 FILE_LOCATION_NAME = "_LOCATION_"
 FILE_LOCATION_ARGUMENT_NAME = "_location_"
+FILE_LOCATION_ATTRIBUTE = "location"
 
 
 class FileLocation:
@@ -52,6 +58,12 @@ class FileLocation:
         else:
             return f"FileLocation({self.line}, {self.column})"
 
+    def __str__(self):
+        if self.path:
+            return f"{self.path}:{self.line}:{self.column}"
+        else:
+            return f"{self.line}:{self.column}"
+
     @classmethod
     def from_ast_node(self, node: ast, path: str):
         return FileLocation(
@@ -61,14 +73,56 @@ class FileLocation:
         )
 
 
+_SENTINEL = object()
+
+
+def get_location(object, default=_SENTINEL) -> Optional[FileLocation]:
+    # Return a FileLocation from an object in a python script.
+    if default is _SENTINEL:
+        return getattr(object, FILE_LOCATION_ATTRIBUTE)
+    return getattr(object, FILE_LOCATION_ATTRIBUTE, default)
+
+
+def is_function_call(node: ast.Call, name: str):
+    if isinstance(node, ast.Call) is False:
+        return False
+
+    if isinstance(node.func, ast.Name) and node.func.id == name:
+        return True
+
+    return False
+
+
+def call_function(name, line, column, args=None, keywords=None):
+    call = ast.Call(
+        func=ast.Name(
+            id=name,
+            ctx=ast.Load(),
+            lineno=line,
+            col_offset=column,
+        ),
+        args=args or [],
+        keywords=keywords or [],
+        lineno=line,
+        col_offset=column,
+    )
+    return call
+
+
 class ScriptCallable:
     def __call__(self, *args, _line_: int, _column_: int, **kwargs):
         pass
 
 
 class ScriptEnvironment(Protocol):
+    # TODO: abc this. We should call and use globals() in descendant environments so StringValue/etc work.
     def globals(self) -> dict[str, ScriptCallable]:
-        pass
+        return {
+            STRING_VALUE_NAME: StringValue,
+            LIST_VALUE_NAME: ListValue,
+            GLOBALS_NAME: globals,
+            FILE_LOCATION_NAME: FileLocation
+        }
 
 
 Globals = dict[str, str]
@@ -290,28 +344,31 @@ class _TransformStringValues(ast.NodeTransformer):
 
     def visit_Constant(self, node: ast.Constant) -> Any:
         if isinstance(node.value, str):
+            line = node.lineno
+            offset = node.col_offset
+
             #logging.debug("Got string cnst %s %s", node.value, node.lineno)
-            file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
+            file_location = _create_file_location_call(self.path, line, offset)
 
             # TODO: separate the values into JoinedString class so we can evaluate later.
             strcall = ast.Call(
                 func=ast.Name(
                     id=STRING_VALUE_NAME,
                     ctx=ast.Load(),
-                    lineno=node.lineno,
-                    col_offset=node.col_offset,
+                    lineno=line,
+                    col_offset=offset,
                 ),
                 args=[node],
                 keywords=[
                     ast.keyword(
                         arg='location',
                         value=file_location,
-                        lineno=node.lineno,
-                        col_offset=node.col_offset,
+                        lineno=line,
+                        col_offset=offset,
                     ),
                 ],
-                lineno=node.lineno,
-                col_offset=node.col_offset,
+                lineno=line,
+                col_offset=offset,
             )
             return strcall
         else:
@@ -319,7 +376,10 @@ class _TransformStringValues(ast.NodeTransformer):
             return node
 
     def visit_JoinedStr(self, node: ast.JoinedStr) -> Any:
-        file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
+        line = node.lineno
+        offset = node.col_offset
+
+        file_location = _create_file_location_call(self.path, line, offset)
 
         # TODO: separate the values into JoinedString class so we can evaluate later.
         strcall = ast.Call(
@@ -328,8 +388,8 @@ class _TransformStringValues(ast.NodeTransformer):
             keywords=[
                 ast.keyword(arg='location', value=file_location),
             ],
-            lineno=node.lineno,
-            col_offset=node.col_offset,
+            lineno=line,
+            col_offset=offset,
         )
         self.generic_visit(node)
 
@@ -340,15 +400,18 @@ class _TransformStringValues(ast.NodeTransformer):
     def visit_Str(self, node):
         self.generic_visit(node)
 
-        file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
+        line = node.lineno
+        offset = node.col_offset
+
+        file_location = _create_file_location_call(self.path, line, offset)
         strcall = ast.Call(
             func=ast.Name(id=STRING_VALUE_NAME, ctx=ast.Load()),
             args=[ast.Str(node.s)],
             keywords=[
                 ast.keyword(arg='location', value=file_location),
             ],
-            lineno=node.lineno,
-            col_offset=node.col_offset,
+            lineno=line,
+            col_offset=offset,
         )
 
         ast.fix_missing_locations(strcall)
@@ -497,23 +560,24 @@ class _TransformListValues(ast.NodeTransformer):
         #if len(node.elts) > 0:
         #    return ast.copy_location(node, node)
         #return ast.copy_location(ast.NameConstant(value=None), node)
+        line = node.lineno
+        offset = node.col_offset
+
         _node = ast.Call(
-            func=ast.Name(
-                id=LIST_VALUE_NAME, ctx=ast.Load(), lineno=node.lineno, col_offset=node.col_offset
-            ),
+            func=ast.Name(id=LIST_VALUE_NAME, ctx=ast.Load(), lineno=line, col_offset=offset),
             args=[node],
             keywords=[],
-            lineno=node.lineno,
-            col_offset=node.col_offset,
+            lineno=line,
+            col_offset=offset,
         )
 
-        file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
+        file_location = _create_file_location_call(self.path, line, offset)
         _node.keywords.append(
             ast.keyword(
                 arg=FILE_LOCATION_ARGUMENT_NAME,
                 value=file_location,
-                lineno=node.lineno,
-                col_offset=node.col_offset
+                lineno=line,
+                col_offset=offset
             )
         )
 
@@ -528,12 +592,27 @@ class _TransformListValues(ast.NodeTransformer):
 
 
 class PythonScriptFile:
-    def __init__(self, path: PathLike, env: ScriptEnvironment, globals: Globals = None):
-        self._env = env
+    def __init__(
+        self,
+        path: PathLike,
+        globals: Globals = None,
+        importer=None,
+        pre_visitors=None,
+        extra_visitors=None,
+        enable_imports=False,
+    ):
+        #self._env = env
         self.path = str(path)
         self.globals = globals or {}
         self.disable_assignment_names = set()
+        self.extra_visitors = extra_visitors or []
+        self.pre_visitors = pre_visitors or []
+        self.enable_imports = enable_imports
+        self.importer = importer or self._importer
+
         # transform attribute calls to have line/column information
+        #self._all_globals = self._env.globals()
+        #self._all_globals.update(self.globals)
 
     def _ast_parse(self, f: BinaryIO):
         # XXX: must be binary due to the way hash_contents works
@@ -546,30 +625,43 @@ class PythonScriptFile:
     def set_disabled_assignment_names(self, names: set):
         self.disable_assignment_names = names
 
-    def execute(self, file: Union[BinaryIO, ast.AST]):
-        if isinstance(file, ast.AST):
-            # TODO: use hasattr(file, "read") instead of isinstance
-            tree = file
-        else:
-            try:
-                tree = self._ast_parse(file)
-            except SyntaxError as e:
-                exc_type, exc_message, exc_traceback = sys.exc_info()
-                l = FileLocation(e.lineno, e.offset, self.path)
-                raise PythonScriptError(e, location=l) from e
+    #def _get_env_attr(self, name):
+    #    if self._env.has_global(name):
+    #        return self._env.get_global(name)
 
-        scope = self._env.globals()
-        scope.update(self.globals)
+    #    try:
+    #        return self._all_globals.get(name)
+    #    except ValueError as e:
+    #        raise PythonScriptError(f"{name} not defined in global scope.")
 
+    def parse(self, file: Union[BinaryIO]) -> ast.AST:
+        # parse and process the ast.
+        # TODO: prefix the modules to execute with the ast to include
+        try:
+            tree = self._ast_parse(file)
+        except SyntaxError as e:
+            exc_type, exc_message, exc_traceback = sys.exc_info()
+            l = FileLocation(e.lineno, e.offset, self.path)
+            raise PythonScriptError(e, location=l) from e
+
+        self._parse(tree)
+
+        return tree
+
+    def _parse(self, tree: ast.AST):
         # set of names to ignore
-        ignore = {STRING_VALUE_NAME, FILE_LOCATION_NAME, LIST_VALUE_NAME}
+        ignore = {STRING_VALUE_NAME, FILE_LOCATION_NAME, LIST_VALUE_NAME, GLOBALS_NAME}
 
         # Catch some early errors
-        t = DisableImports(self.path)
-        t.visit(tree)
+        if False:
+            t = DisableImports(self.path)
+            t.visit(tree)
 
         t = _DisableAssignments(self.path, self.disable_assignment_names)
         t.visit(tree)
+
+        for visitor in self.pre_visitors:
+            visitor.visit(tree)
 
         # XXX: calls should be transformed first
         t = _TransformCallsToHaveFileLocation(ignore, self.path)
@@ -582,11 +674,67 @@ class PythonScriptFile:
         t = _TransformListValues(self.path)
         t.visit(tree)
 
+        for visitor in self.extra_visitors:
+            visitor.visit(tree)
+
+    def _importer(self, name, globals=None, locals=None, fromlist=(), level=0):
+        # level = 1 if relative import. e.g from .module import item
+        # TODO: improve this error location
+        raise ImportError("Imports are disabled here.")
+
+    def execute(self, tree: ast.AST):
+        if not isinstance(tree, ast.AST):
+            raise ValueError(f"Expected AST argument. Got {type(tree)}")
+            # TODO: use hasattr(file, "read") instead of isinstance
+            #tree = file
+        #else:
+        #    tree = self.parse(file)
+        from importlib.abc import Loader
+
+        class CustomModule(types.ModuleType):
+            def __init__(self, name):
+                super().__init__(name)
+                self.macros = {}
+
+            def __getattribute__(self, item):
+                if item == "__dict__":
+                    return self.__dict__
+
+                macro = self.macros.get(item, None)
+
+                if macro is None:
+                    raise PythonScriptError(
+                        f"Can't import {item} from {self.name}", FileLocation(0, 0, "//")
+                    )
+                return macro
+
+        class MakexLoader(Loader):
+            def create_module(self, spec: ModuleSpec) -> Union[types.ModuleType, None]:
+                print("CREATING MODULE", spec)
+                module = types.ModuleType(spec.name)
+                #exec(code, module.__dict__)
+
+                return module
+
+            def exec_module(self, module: types.ModuleType) -> None:
+                print("Exec module", module)
+                pass
+
+        #scope = self._env.globals()
+        #scope.update(self.globals)
+        scope = self.globals
+        #scope["__getattr__"] = self._get_env_attr
+
+        scope["__builtins__"] = {}
+
+        if self.enable_imports:
+            scope["__builtins__"] = {"__import__": self.importer}
         #print(ast.dump(tree, indent=2))
 
         scope[STRING_VALUE_NAME] = StringValue
         scope[FILE_LOCATION_NAME] = FileLocation
         scope[LIST_VALUE_NAME] = ListValue
+        scope[GLOBALS_NAME] = globals
 
         try:
             code = compile(tree, self.path, 'exec')
@@ -606,13 +754,20 @@ class PythonScriptFile:
                 location = FileLocation(last.lineno, 0, self.path)
             raise PythonScriptError(e, location=location) from e
 
-        except (IndexError, NameError) as e:
+        except (IndexError, NameError, AttributeError) as e:
             #LOGGER.exception(e)
             exc_type, exc_message, exc_traceback = sys.exc_info()
             # COMPAT: PYTHON 3.5+
             tb1 = traceback.TracebackException.from_exception(e)
             last = tb1.stack[-1]
-            l = FileLocation(last.lineno, 0, self.path)
+
+            l = FileLocation(last.lineno, 0, last.filename)
+            for item in tb1.stack:
+                print("TRACE", item)
+                #if item.filename == self.path:
+                #    location = FileLocation(item.lineno, 0, self.path)
+                #    break
+
             raise PythonScriptError(e, location=l) from e
 
         except StopPythonScript as e:
@@ -623,11 +778,18 @@ class PythonScriptFile:
             l = FileLocation(last.lineno, 0, self.path)
             raise PythonScriptError(e, location=l) from e
 
+        except ImportError as e:
+            tb1 = traceback.TracebackException.from_exception(e)
+            last = tb1.stack[-1]
+            l = FileLocation(last.lineno, 0, self.path)
+            raise PythonScriptError(e, location=l) from e
         except SyntaxError as e:
             #LOGGER.exception(e)
             exc_type, exc_message, exc_traceback = sys.exc_info()
             l = FileLocation(e.lineno, e.offset, self.path)
             raise PythonScriptError(e, location=l) from e
+
+        return code
 
 
 def pretty_exception(exception, location: FileLocation):

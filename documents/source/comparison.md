@@ -13,7 +13,7 @@
   - Thus, Bazel removes a lot of sharp edges to cater for the lowest common denominator.
     - E.g. glob's are not implemented for performance.
   - Makex was designed to be powerful for engineers and safe enough.
-- Bazel adopts multiple syntaxes for referring to targets in external workspaces (e.g. @external).
+- Bazel adopts multiple syntaxes for referring to tasks in external workspaces (e.g. @external).
   - Makex provides a more logical view of both internal and external workspaces.
 
 ## CMake

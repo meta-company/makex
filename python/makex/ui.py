@@ -13,7 +13,7 @@ from makex.colors import (
 from makex.python_script import FileLocation
 
 
-def isansitty() -> bool:
+def is_ansi_tty() -> bool:
     """
     Checks if stdout supports ANSI escape codes and is a tty.
     https://stackoverflow.com/a/75703990
@@ -46,6 +46,11 @@ class UI:
     def __init__(self, verbosity=None, colors=NoColors):
         self.colors = colors
         self.verbosity = verbosity or 0
+
+    def warn(self, message):
+        print(
+            f"{self.colors.MAKEX}[makex]{self.colors.RESET}{self.colors.WARNING}[WARNING]{self.colors.RESET}: {message}"
+        )
 
     def error(self, message):
         print(message, file=sys.stderr)

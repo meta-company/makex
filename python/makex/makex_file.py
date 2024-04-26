@@ -1,8 +1,10 @@
+import ast
 import logging
 import os
 import re
 import shlex
 import shutil
+import types
 from abc import (
     ABC,
     abstractmethod,
@@ -18,8 +20,8 @@ from os.path import (
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     Iterable,
-    Mapping,
     Optional,
     Pattern,
     Protocol,
@@ -57,9 +59,26 @@ from makex.flags import (
     GLOBS_IN_ACTIONS_ENABLED,
     GLOBS_IN_INPUTS_ENABLED,
     HOME_FUNCTION_ENABLED,
+    IMPORT_ENABLED,
+    INCLUDE_ENABLED,
     NAMED_OUTPUTS_ENABLED,
     SHELL_USES_RETURN_CODE_OF_LINE,
     TARGET_PATH_ENABLED,
+)
+from makex.makex_file_types import (
+    AllPathLike,
+    EnvironmentVariableProxy,
+    Expansion,
+    FindFiles,
+    Glob,
+    ListTypes,
+    MultiplePathLike,
+    PathElement,
+    PathLikeTypes,
+    PathObject,
+    RegularExpression,
+    ResolvedTargetReference,
+    TargetReferenceElement,
 )
 from makex.patterns import (
     combine_patterns,
@@ -67,16 +86,19 @@ from makex.patterns import (
 )
 from makex.protocols import (
     CommandOutput,
-    FileProtocol,
     StringHashFunction,
 )
 from makex.python_script import (
+    GLOBALS_NAME,
     FileLocation,
     ListValue,
     PythonScriptError,
     PythonScriptFile,
     ScriptEnvironment,
     StringValue,
+    _create_file_location_call,
+    call_function,
+    is_function_call,
     wrap_script_function,
 )
 from makex.run import run
@@ -87,241 +109,61 @@ from makex.target import (
     target_hash,
 )
 from makex.ui import pretty_file
+from makex.version import VERSION
 from makex.workspace import Workspace
-
-ListTypes = (list, ListValue)
-
-
-class VariableValue:
-    pass
-
-
-class Variable:
-    name: str
-    value: VariableValue
-    location: FileLocation
-
-
-@dataclass(frozen=True)
-class Variant:
-    name: str
-    value: str
-
-
-class RegularExpression:
-    pattern: str
-    location: FileLocation
-
-    def __init__(self, pattern, location):
-        self.pattern = pattern
-        self.location = location
-
-    def __str__(self):
-        return self.pattern
-
-
-class Glob:
-    pattern: StringValue
-    location: FileLocation
-
-    def __init__(self, pattern, location):
-        self.pattern = pattern
-        self.location = location
-
-    def __str__(self):
-        return self.pattern
-
-
-@dataclass()
-class Expansion:
-    """
-    Define a string that will expand according to the shells rules.
-
-    expand("~/.config/path") will exapnd a  user path.
-
-    expand("$VARIABLE") will expand a variable.
-
-    On Unix and Windows, a string that starts with ~ or ~user replaced by that user’s home directory.
-
-    On Unix, an initial ~ is replaced by the environment variable HOME if it is set;
-    otherwise the current user’s home directory is looked up in the password directory through the built-in module pwd.
-    An initial ~user is looked up directly in the password directory.
-
-    On Windows, USERPROFILE will be used if set, otherwise a combination of HOMEPATH and HOMEDRIVE will be used.
-     An initial ~user is handled by checking that the last directory component of the current user’s home directory
-     matches USERNAME, and replacing it if so.
-
-    If the expansion fails or if the path does not begin with a tilde, the path is returned unchanged.
-
-    Substrings of the form $name or ${name} are replaced by the value of environment variable name.
-     Malformed variable names and references to non-existing variables are left unchanged.
-
-    """
-    context: Context
-    string: StringValue
-    location: FileLocation
-
-    # XXX: cache the expanded state
-    _expanded: str = None
-
-    def expand(self, ctx):
-        string = self.string
-        return os.path.expandvars(os.path.expanduser(string))
-
-    def __str__(self):
-        if self._expanded is not None:
-            return self._expanded
-
-        self._expanded = self.expand(self.context)
-        return self._expanded
-
-    def __repr__(self):
-        return f"Expansion({self.string!r})"
-
-
-class PathObject:
-    """
-    The [output] path() object in makex files.
-
-    """
-    def __init__(self, path: Path, location: FileLocation = None):
-        self.path: Path = path
-        self.location = location
-
-    def __str__(self):
-        return self.path.as_posix()
-
-    def __repr__(self):
-        return f"PathObject(path={self.path.as_posix()!r})"
-
-    def __truediv__(self, other):
-        if isinstance(other, StringValue):
-            return PathObject(self.path.joinpath(other.value), other.location)
-        elif isinstance(other, PathObject):
-            return PathObject(self.path / other.path, other.location)
-        else:
-            top = self
-            bottom = other
-            raise TypeError(f"Unsupported operation: {top} / {bottom!r}")
-
-
-class BuildPathVariable:
-    location: FileLocation
-
-    def __init__(self, location=None):
-        self.location = location
-
-    def __str__(self):
-        return "$$$$$$BUILD$$$$$$$"
-
-
-class TargetOutput:
-    def __str__(self):
-        return "$$$$$TARGET-OUTPUT$$$$$"
-
-
-class PathElement:
-    """
-
-    Implements the Path() object as defined in spec.
-
-    Arbitrary paths, relative or absolute.
-
-    """
-    # the original path as defined
-    parts: Union[tuple[str], list[str]] = None
-
-    # Resolved is the actual fully resolved absolute path if any.
-    # XXX: This is an optimization for when we can resolve a path
-    resolved: Path
-
-    location: FileLocation
-
-    # base path of relative paths
-    base: str
-
-    def __init__(self, *args: str, base: str = None, resolved=None, location=None):
-        # TODO: change *args to parts.
-        self.parts = args
-        self.location = location
-        self.resolved = resolved
-        self._path = path = Path(*args)
-        self.base = base
-        if resolved is None:
-            if path.is_absolute():
-                self.resolved = path
-        else:
-            self.resolved = resolved
-
-    @property
-    def name(self):
-        return StringValue(self._path.name, self.location)
-
-    def _as_path(self):
-        return self._path
-
-    if False:
-
-        def absolute(self, _location_: FileLocation = None) -> "PathElement":
-            """
-            Used in the script environment to make paths absolute.
-
-            :param root:
-            :return:
-            """
-
-            # TODO: we should get _line/column/path from the transform call
-            path = Path(*self.parts)
-
-            if not path.is_absolute():
-                path = self.base / path
-
-            return PathElement(*path.parts, resolved=path, location=_location_)
-
-    def __truediv__(self, other):
-        if isinstance(other, StringValue):
-            if self.resolved:
-                _path = Path(other)
-                resolved = self.resolved.joinpath(*_path.parts)
-            else:
-                _path = Path(other)
-                resolved = None
-
-            parts = self.parts + _path.parts
-
-            return PathElement(*parts, resolved=resolved, location=other.location)
-
-        if not isinstance(other, PathElement):
-            raise TypeError(f"Unsupported operation {self} / {other}")
-
-        resolved = None
-        if other.resolved and self.resolved:
-            raise TypeError(
-                f"Can't combine two fully absolute resolved Paths. "
-                f"The first path must be absolute, and the other path must be relative \n. "
-                f"Unsupported operation {self} / {other}"
-            )
-        else:
-            if self.resolved:
-                resolved = self.resolved.joinpath(*other.parts)
-            elif other.resolved:
-                raise TypeError("Can't combine unresolved path with resolved path.")
-
-        parts = self.parts + other.parts
-        return PathElement(*parts, resolved=resolved, location=other.location)
-
-    def __repr__(self):
-        return f'PathElement({self._as_path()})'
-
-    def __str__(self):
-        if self.resolved:
-            return str(self.resolved)
-        else:
-            raise Exception("Can't use unresolved path here.")
+from typing_extensions import (
+    NotRequired,
+    Required,
+    Unpack,
+)
+
+_TARGET_REFERENCE_NAME = "Reference"
+_MACRO_DECORATOR_NAME = "macro"
+
+TARGETS_MODULE_VARIABLE = "_TARGETS_"
+MACROS_MODULE_VARIABLE = "__macros__"
+MACRO_NAMES_MODULE_VARIABLE = "__macro_names__"
+
+DISABLE_ASSIGNMENT_NAMES = {
+    MACROS_MODULE_VARIABLE,
+    MACRO_NAMES_MODULE_VARIABLE,
+    MACRO_NAMES_MODULE_VARIABLE,
+    "target",
+    "Target",
+    _MACRO_DECORATOR_NAME,
+    _TARGET_REFERENCE_NAME,
+    "task",
+    "Task",
+    "path",
+    "execute",
+    "shell",
+    "copy",
+    "print",
+    "E",
+    "ENVIRONMENT",
+    "Environment",
+    "environment",
+    "glob",
+    "pattern",
+    "input",
+    "inputs",
+    "output",
+    "outputs",
+    "find",
+    "Path",
+    "source",
+    "home",
+    "archive",
+    "mirror",
+    "sync",
+    "include",
+}
+
+# TODO: move these to makex_file_types
 
 
 def _validate_path(
-    parts: Union[list[str], tuple[str]],
+    parts: Union[list[StringValue], tuple[StringValue]],
     location: FileLocation,
     absolute=ABSOLUTE_PATHS_ENABLED,
 ):
@@ -364,7 +206,7 @@ def resolve_string_path_workspace(
     elif not path.is_absolute():
         _path = base / path
 
-    trace("Resolve string path %s: %s", element, _path)
+    #trace("Resolve string path %s: %s", element, _path)
 
     return _path
 
@@ -417,27 +259,6 @@ def resolve_path_parts_workspace(
         path = base / path
 
     return path
-
-
-class FindFiles:
-    """
-    find files. relative paths are based on the input.
-    """
-    pattern: Union[Glob, RegularExpression]
-    path: Optional[PathElement] = None
-
-    location: FileLocation
-
-    def __init__(self, pattern, path, location):
-        self.pattern = pattern
-        self.path = path
-        self.location = location
-
-
-# TODO: handle bytes
-PathLikeTypes = Union[StringValue, PathElement, PathObject]
-MultiplePathLike = Union[Glob, FindFiles]
-AllPathLike = Union[Glob, FindFiles, StringValue, PathElement]
 
 
 def _string_value_maybe_expand_user(ctx, base, value: StringValue) -> str:
@@ -501,7 +322,7 @@ def resolve_string_argument_list(
     for value in values:
         if isinstance(value, StringValue):
             # XXX: we're not using our function here because we may not want to expand ~ arguments the way bash does
-            # bash will replace a ~ whereever it is on the command line
+            # bash will replace a ~ wherever it is on the command line
             yield _string_value_maybe_expand_user(ctx, base, value)
         elif isinstance(value, PathObject):
             yield value.path.as_posix()
@@ -565,16 +386,16 @@ def resolve_glob(
     ctx: Context,
     target: "TargetObject",
     path,
-    pattern: Optional[Union[Glob]],
+    pattern: Glob,
     ignore_names,
 ) -> Iterable[Path]:
     # TODO: check if glob is absolute here?
     glob_pattern = pattern.pattern
-    pattern = re.compile(make_glob_pattern(str(glob_pattern)))
+    _pattern = re.compile(make_glob_pattern(str(glob_pattern)))
 
     yield from find_files(
         path,
-        pattern=pattern,
+        pattern=_pattern,
         ignore_pattern=ctx.ignore_pattern,
         ignore_names=ignore_names,
     )
@@ -588,7 +409,7 @@ def resolve_find_files(
     ignore_names,
 ) -> Iterable[Path]:
 
-    #TODO: support matchin stringvalues to paths
+    #TODO: support matching stringvalues to paths
     if isinstance(pattern, (Glob, str)):
         pattern = re.compile(make_glob_pattern(str(pattern)))
     elif isinstance(pattern, RegularExpression):
@@ -610,13 +431,30 @@ def resolve_find_files(
 
 
 def _resolve_executable(
-    ctx, target, name: StringValue, base: Path, path_string: str = None
+    ctx,
+    target,
+    name: StringValue,
+    base: Path,
+    path_string: Optional[str] = None,
 ) -> Path:
     if name.find("/") >= 0:
-
+        # path has a slash. resolve using a different algo.
         _path = resolve_string_path_workspace(ctx, target.workspace, name, base)
+        if _path.exists() is False:
+            raise ExecutionError(
+                f"Could not find the executable for {name}. Please install whatever it "
+                f"is that provides the command {name!r}.",
+                target
+            )
         return _path
 
+    path_string = ctx.environment.get("PATH", "")
+    if not path_string:
+        path_string = str(base)
+    else:
+        path_string = f"{base}:{path_string}"
+
+    # XXX: prepend the current folder to the path so executables are found next to the makex file.
     _path = shutil.which(name, path=path_string)
 
     if _path is None:
@@ -634,8 +472,7 @@ def _resolve_executable(
 
 
 def create_build_path_object(ctx: Context, target, path, variants, location: FileLocation):
-    workspace = ctx.workspace_path
-
+    # TODO: remove this function. replace with late evaluation.
     path, link_path = get_build_path(
         objective_name=target,
         variants=variants or [],
@@ -660,6 +497,9 @@ def make_hash_from_dictionary(d: dict[str, str]):
     return target_hash("|".join(flatten))
 
 
+# TODO: move these to makex_file_actions.py
+
+
 class ActionElementProtocol(Protocol):
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> dict[str, Any]:
         ...
@@ -670,6 +510,22 @@ class ActionElementProtocol(Protocol):
 
 class InternalActionBase(ABC):
     location: FileLocation = None
+
+    # TODO: add/collect requirements as we go
+    def add_requirement(self, requirement: "TargetReferenceElement"):
+        raise NotImplementedError
+
+    # TODO: make abstract and wire in.
+    def get_requirements(self, ctx: Context) -> list["TargetReferenceElement"]:
+        """
+        Return a list of any target requirements in the action/arguments. Done before argument transformation.
+
+        Any TargetReference or Path used by the target should be returned (except one for the Target itself).
+
+        Used to detect implicit target requirements.
+        :return:
+        """
+        return []
 
     @abstractmethod
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> ArgumentData:
@@ -712,7 +568,8 @@ class Execute(InternalActionBase):
 
         for argument in self.arguments:
             if isinstance(argument, StringValue):
-                arguments.append(_string_value_maybe_expand_user(ctx, target_input, argument))
+                #arguments.append(_string_value_maybe_expand_user(ctx, target_input, argument))
+                arguments.append(argument)
             elif isinstance(argument, PathElement):
                 arguments.append(
                     _resolve_pathlike(ctx, target, target_input, target.name, argument).as_posix()
@@ -780,7 +637,7 @@ class Execute(InternalActionBase):
         return hash_function("|".join([_executable] + _arguments))
 
 
-class ShellCommand(InternalActionBase):
+class Shell(InternalActionBase):
     string: list[StringValue]
     location: FileLocation
 
@@ -826,7 +683,6 @@ class ShellCommand(InternalActionBase):
         _script.append("__error=0")
         #script.append(r"IFS=$'\n'")
         for i, line in enumerate(string):
-
             #script.append(f"({line}) || (exit $?)")
             if ctx.verbose > 0 or ctx.debug:
                 _script.append(
@@ -842,18 +698,19 @@ class ShellCommand(InternalActionBase):
                 )
             else:
                 _script.append(f"{{ {line}; }}")
-
-            #script.append(f"( {line} ) || (exit $?)")
+                #script.append(f"( {line} ) || (exit $?)")
 
         script = "\n".join(_script)
         trace("Real script:\n%s", script)
-        #stdin = BytesIO()
-        #stdin.write(script.encode("utf-8"))
+
         cwd = target.input_path
         ctx.ui.print(f"Running shell from {cwd}:\n{s_print}\n")
         if ctx.dry_run is True:
             return CommandOutput(0)
         try:
+            #stdin = BytesIO()
+            #stdin.write(script.encode("utf-8"))
+
             # create a real pipe to pass to the specified shell
             read, write = os.pipe()
             os.write(write, script.encode("utf-8"))
@@ -875,8 +732,6 @@ class ShellCommand(InternalActionBase):
             return output
         except Exception as e:
             raise ExecutionError(e, target, location=self.location) from e
-        #finally:
-        #    ctx.ui.print("Script finished")
 
     def hash(self, ctx: Context, arguments: dict[str, Any], hash_function: StringHashFunction):
         return hash_function("\n".join(arguments.get("string", [])))
@@ -895,6 +750,7 @@ class Copy(InternalActionBase):
     destination: PathLikeTypes
     exclude: list[AllPathLike]
     location: FileLocation
+    destination_is_subdirectory: bool = False
 
     def hash(self, ctx: Context, arguments: dict[str, Any], hash_function):
         # checksum all the sources
@@ -916,6 +772,15 @@ class Copy(InternalActionBase):
             parts.append(hash_function(exclusions.pattern))
 
         return hash_function("|".join(parts))
+
+    def get_requirements(self, ctx: Context) -> Iterable["TargetReferenceElement"]:
+        if isinstance(self.source, ListTypes):
+            for source in self.source:
+                if isinstance(source, PathObject):
+                    yield source.reference
+        else:
+            if isinstance(self.source, PathObject):
+                yield self.source.reference
 
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> ArgumentData:
         if isinstance(self.source, ListTypes):
@@ -940,6 +805,14 @@ class Copy(InternalActionBase):
             ]
 
         if self.destination:
+
+            if not isinstance(self.destination, (str, PathObject, PathElement)):
+                raise PythonScriptError("Destination must be a string or path.", self.location)
+
+            if isinstance(self.destination, str):
+                if "/" in self.destination:
+                    self.destination_is_subdirectory = True
+
             destination = _resolve_pathlike(
                 ctx=ctx,
                 target=target,
@@ -947,6 +820,7 @@ class Copy(InternalActionBase):
                 base=target.path,
                 value=self.destination
             )
+
         else:
             destination = None
 
@@ -1024,16 +898,18 @@ class Copy(InternalActionBase):
 
         # XXX: keep n sources so we can determine which form of copy() we have (8 forms).
         #  copy(items) will always use the file/folder name in the items list
-        #  copy(file, file) copy a file to specified file path.
-        #  copy(folder, folder) allows renaming or mirroring a folder.
-        #  copy(folders, folder) copies a set of folders to the specified folder..
-        #  copy(files, folder) copies a set of files to the specified folder.
         #  copy(files)
         #  copy(file)
         #  copy(folders)
         #  copy(folder)
+        # with destination:
+        #  copy(file, file) copy a file to specified file path. TODO: this doesn't work. remove this. suggest install()
+        #  copy(file, folder) copy a file to specified folder.
+        #  copy(folder, folder) allows renaming or mirroring a folder.
+        #  copy(folders, folder) copies a set of folders to the specified folder..
+        #  copy(files, folder) copies a set of files to the specified folder.
 
-        #  copy(file, "folder" / file) allows renaming a file and prefixing it into a folder.
+        #  copy(file, "folder" / file) allows renaming a file and prefixing it into a folder. TODO: remove this. suggest install()
         n_sources = len(sources)
 
         for source in sources:
@@ -1094,15 +970,13 @@ class Copy(InternalActionBase):
                                 )
                         if ctx.debug:
                             logging.exception(e)
-                        string = "\n".join(string)
-                        raise ExecutionError(string, target, target.location) from e
+                        raise ExecutionError("\n".join(string), target, target.location) from e
                     except OSError as e:
                         string = [
                             f"Error copying tree {source} to {destination}:\n  Error to {e.filename} from {e.filename2}: {type(e)}: {e.args[0]} {e} "
                         ]
 
-                        string = "\n".join(string)
-                        raise ExecutionError(string, target, target.location) from e
+                        raise ExecutionError("\n".join(string), target, target.location) from e
             else:
                 trace("Copy file %s <- %s", _destination, source)
                 if ctx.dry_run is False:
@@ -1159,25 +1033,10 @@ class Synchronize(InternalActionBase):
 
         _source_list = self.source
 
-        try:
-            _source_list = iter(_source_list)
-        except TypeError:
-            # make it iterable and try.
-            _source_list = [_source_list]
-            if False:
-                # not iterable
-                raise PythonScriptError(
-                    f"Expected variable number of sources, got {type(_source_list)}: {_source_list!r}",
-                    getattr(_source_list, "location", self.location)
-                )
+        if isinstance(self.source, (list, ListValue)):
+            _source_list = self.source
         else:
-            # iterable
-            pass
-
-        #if not isinstance(self.source, ListTypes):
-        #    raise PythonScriptError(
-        #        f"Expected variable number of sources, got {type(self.source)}: {self.source!r}", getattr(self.source, "location", self.location)
-        #    )
+            _source_list = [self.source]
 
         args["sources"] = sources = list(
             resolve_pathlike_list(
@@ -1189,7 +1048,7 @@ class Synchronize(InternalActionBase):
                 glob=GLOBS_IN_ACTIONS_ENABLED,
             )
         )
-        trace("Synchronize sources %s", sources)
+        #trace("Synchronize sources %s", sources)
 
         if self.destination:
             destination = _resolve_pathlike(
@@ -1199,12 +1058,8 @@ class Synchronize(InternalActionBase):
                 base=target.path,
                 value=self.destination
             )
-            if ctx.dry_run is False:
-                destination.mkdir(parents=True, exist_ok=True)
         else:
             destination = target.path
-            if ctx.dry_run is False:
-                destination.mkdir(parents=True, exist_ok=True)
 
         args["destination"] = destination
         args["symlinks"] = self.symlinks
@@ -1218,14 +1073,17 @@ class Synchronize(InternalActionBase):
 
         ignore = file_ignore_function(ctx.output_folder_name)
 
+        if ctx.dry_run is False:
+            destination.mkdir(parents=True, exist_ok=True)
+
         debug("Synchronize to destination: %s", destination)
 
         length = len(sources)
 
         if length > 1:
-            ctx.ui.print(f"Synchonizing to {destination} ({length} items)")
+            ctx.ui.print(f"Synchronizing to {destination} ({length} items)")
         else:
-            ctx.ui.print(f"Synchonizing to {destination} ({sources[0]})")
+            ctx.ui.print(f"Synchronizing to {destination} ({sources[0]})")
 
         for source in sources:
             #trace("Synchronize source to destination: %s: %s", source, destination)
@@ -1290,11 +1148,15 @@ class Print(InternalActionBase):
 class Write(InternalActionBase):
     path: PathLikeTypes
     data: StringValue
+    executable: bool = False
 
-    def __init__(self, path: PathLikeTypes, data: StringValue = None, location=None):
+    def __init__(
+        self, path: PathLikeTypes, data: StringValue = None, executable=False, location=None
+    ):
         self.path = path
         self.data = data
         self.location = location
+        self.executable = False
 
     def transform_arguments(self, ctx: Context, target: EvaluatedTarget) -> ArgumentData:
         args = {}
@@ -1313,13 +1175,18 @@ class Write(InternalActionBase):
             )
 
         args["data"] = data
+        args["executable"] = self.executable
         return ArgumentData(args, inputs=[path])
 
     def run_with_arguments(self, ctx: Context, target: EvaluatedTarget, arguments) -> CommandOutput:
-        path = arguments.get("path")
+        path: Path = arguments.get("path")
         data = arguments.get("data")
 
         ctx.ui.print(f"Writing {path}")
+
+        if ctx.dry_run is False:
+            if not path.parent.exists():
+                path.parent.mkdir(mode=0o755, parents=True)
 
         if data is None:
             debug("Touching file at %s", path)
@@ -1331,8 +1198,11 @@ class Write(InternalActionBase):
                 path.write_text(data)
         else:
             raise ExecutionError(
-                "Invalid argument text argument to write()", target, location=target.location
+                "Invalid argument data argument to write()", target, location=target.location
             )
+
+        if self.executable:
+            path.chmod(0o755)
 
         return CommandOutput(0)
 
@@ -1385,72 +1255,126 @@ class SetEnvironment(InternalActionBase):
         return hash_function(environment_string)
 
 
-@dataclass(frozen=True)
-class TargetReferenceElement:
+class InsertAST(ast.NodeTransformer):
+    def __init__(self, path, asts: list[ast.AST]):
+        self.path = path
+        self.asts = asts
+
+    def visit_Module(self, node: ast.Module) -> Any:
+        node.body = self.asts + node.body
+
+
+class ProcessIncludes(ast.NodeTransformer):
     """
-    A reference to a target in a makex file: Target(name, path).
+        Adds a globals() argument to include() calls so that the environment can modify its own globals.
 
-    Also produced synthetically when : is called.
+
+        TODO: includes should be at the top of the file; enforcing this is tricky.
+        we need to scan the body for any include() calls.
+        if any include() is found after any other statement, raise an error
     """
-    name: StringValue
-    path: Union[PathElement, StringValue] = None
-    location: FileLocation = None
+    def __init__(self, path: str):
+        self.path = path
+        self.includes_seen: list[tuple[str, FileLocation]] = []
 
-    def __repr__(self):
-        path = self.path
-        if path is not None:
-            return f"TargetReferenceElement({self.name.value!r}, {path!r})"
+    def visit_Call(self, node: ast.Call) -> Any:
+        if is_function_call(node, "include") is False:
+            return node
 
-        return f"TargetReferenceElement({self.name.value!r})"
+        line = node.lineno
+        col = node.col_offset
+
+        #location = FileLocation(line, col, self.path)
+        #if other_nodes_seen:
+        #    raise PythonScriptError("Includes must be at the top of a file.", location)
+        #else:
+        #self.includes_seen.append((node.args[0].value, location))
+
+        node.keywords.append(
+            ast.keyword(
+                arg='_globals',
+                value=call_function(GLOBALS_NAME, line, col),
+                lineno=line,
+                col_offset=col,
+            )
+        )
+        #debug("Transform include %s", ast.dump(node))
+        return node
 
 
-@dataclass(frozen=True)
-class ResolvedTargetReference:
+class TransformGetItem(ast.NodeTransformer):
     """
-    Used in a target graph and for external matching.
+        Transforms Target Reference Slice Syntax: Target[path:name] into a TargetReference(name, path)
+
+
+    >>> print(ast.dump(ast.parse('target["test":"test":"test"]', mode='single'), indent=4))
+
+        Subscript(
+            value=Name(id='target', ctx=Load()),
+            slice=Slice(
+                lower=Constant(value='test'),
+                upper=Constant(value='test'),
+                step=Constant(value='test')),
+            ctx=Load()
+            )
+        )
     """
-    name: StringValue
+    NAME = "Target"
 
-    # path the actual makex file containing the target
-    path: Path
+    def __init__(self, path):
+        super().__init__()
+        self.path = str(path)
 
-    # where this reference was defined
-    location: FileLocation = None
+    def visit_Subscript(self, node: ast.Subscript) -> Any:
+        if isinstance(node.value, ast.Name) is False:
+            self.generic_visit(node)
+            return node
+        if node.value.id != self.NAME:
+            self.generic_visit(node)
+            return node
 
-    def key(self):
-        return format_hash_key(self.name, self.path)
+        line = node.lineno
+        offset = node.col_offset
+        slice: ast.Slice = node.slice
 
-    def __eq__(self, other):
-        #assert isinstance(other, ResolvedTargetReference), f"Got {type(other)} {other}. Expected ResolvedTarget"
-        assert hasattr(other, "key"), f"{other!r} has no key() method."
-        assert callable(getattr(other, "key"))
-        return self.key() == other.key()
+        lower = slice.lower or ast.Constant(None, lineno=line, col_offset=offset)
+        upper = slice.upper or ast.Constant(None, lineno=line, col_offset=offset)
+        step = slice.step or ast.Constant(None, lineno=line, col_offset=offset)
 
-    def __hash__(self):
-        return hash(self.key())
+        file_location = _create_file_location_call(self.path, line, offset)
 
-
-class TargetType:
-    def _get_item(self, subscript, location: FileLocation):
-        if isinstance(subscript, slice):
-            # handle target[start:stop:step]
-            # TODO: use step for variants.
-            start, stop, step = subscript.start, subscript.stop, subscript.step
-            if start is None and stop:
-                return TargetReferenceElement(stop)
-            elif start and stop is None:
-                return TargetReferenceElement(stop)
-            elif start and stop:
-                TargetReferenceElement(stop, start, location=location)
-        else:
-            # handle target[item]
-            # TODO: handle locations
-            if not isinstance(subscript, StringValue):
-                raise PythonScriptError(
-                    f"Subscript must be a string. Got {subscript!r} ({type(subscript)})",
-                    location=location
-                )
-            return TargetReferenceElement(subscript, location=location)
+        reference_call = ast.Call(
+            func=ast.Name(
+                id=_TARGET_REFERENCE_NAME,
+                ctx=ast.Load(),
+                lineno=line,
+                col_offset=offset,
+            ),
+            args=[],
+            keywords=[
+                ast.keyword(
+                    arg='name',
+                    value=upper,
+                    lineno=line,
+                    col_offset=offset,
+                ),
+                ast.keyword(
+                    arg='path',
+                    value=lower,
+                    lineno=line,
+                    col_offset=offset,
+                ),
+                ast.keyword(
+                    arg='location',
+                    value=file_location,
+                    lineno=line,
+                    col_offset=offset,
+                ),
+            ],
+            lineno=line,
+            col_offset=offset,
+        )
+        return reference_call
 
 
 class TargetObject:
@@ -1459,6 +1383,9 @@ class TargetObject:
     requires: list[Union[PathElement, PathObject, "TargetObject"]]
     commands: list[ActionElementProtocol]
 
+    # TODO: inputs dictionary, "" or None is for unnamed inputs
+    inputs: dict[None, AllPathLike]
+
     # outputs as a list. fast checks if has any outputs
     outputs: list[PathElement]
 
@@ -1466,9 +1393,10 @@ class TargetObject:
     # None key is unnamed outputs
     outputs_dict: dict[Union[None, str], list[Union[PathElement, PathObject]]]
 
-    # location to build. can be overidden by users.
+    # location to build. can be overridden by users.
     build_path: Path
 
+    # The location in which this task was actually defined (i.e. where the task() function was called).
     location: FileLocation
 
     resolved_requires: list[ResolvedTargetReference]
@@ -1477,7 +1405,10 @@ class TargetObject:
 
     #makex_file_checksum: str
 
+    # The makex file in which this target was registered
     makex_file: "MakexFile"
+
+    endless: bool = False
 
     def __init__(
         self,
@@ -1491,6 +1422,9 @@ class TargetObject:
         workspace=None,
         #makex_file_checksum=None,
         makex_file=None,
+        # TODO: pass the includer file so we can distinguish between where a target was defined and where it was finally included
+        #   we need to use the includer to generate target.keys()
+        includer=None,
         location=None,
     ):
         #if not path is None:
@@ -1504,7 +1438,7 @@ class TargetObject:
         self.build_path = build_path
         self.workspace = workspace
 
-        # cache the requirement references weve obtained so we don't have to search for makex file later
+        # cache the requirement references we've obtained so we don't have to search for makex file later
         self.resolved_requires = []
         self.outputs_dict = outputs_dict or {}
 
@@ -1520,51 +1454,47 @@ class TargetObject:
     def all_outputs(self) -> Iterable[Union[PathElement, PathObject]]:
         d = self.outputs_dict
         if not d:
-            return
+            return None
+
         yield from d.get(None)
 
         for k, v in d.items():
-            yield from v
+            if isinstance(v, list):
+                yield from v
+            else:
+                yield v
 
     def add_resolved_requirement(self, requirement: ResolvedTargetReference):
         self.resolved_requires.append(requirement)
 
     @property
     def makex_file_path(self) -> str:
-        return self.location.path
+        return self.makex_file.path.as_posix()
 
     def path_input(self):
-        return Path(self.location.path).parent
+        """ Return the directory where this target is declared/applicable. """
+        return self.makex_file.directory
 
     def __eq__(self, other):
         if not isinstance(other, (TargetObject, ResolvedTargetReference)):
             return False
 
         return self.key() == other.key()
-        #return other.path == self.path and self.name == other.name
 
     def key(self):
-        #if self.path is None or self.path.resolved:
-        #    raise Exception(f"Can't hash key of unresovled {self!r}")
-
-        return format_hash_key(self.name, self.location.path)
-
-        #return hash_target(self)
+        return format_hash_key(self.name, self.makex_file.path)
 
     def __hash__(self):
-
-        #if self.path is None:
-        #    return hash(f":{self.name}:")
-
-        #if not self.path.as_path():
-        #    raise Exception(f"Can't hash unresolved path {self.path}")
-
         return hash(self.key())
 
     def __repr__(self):
         if self.path:
-            return f"TargetObject(\"{self.name}\", {self.location.path})"
+            return f"TargetObject(\"{self.name}\", {self.makex_file.path})"
         return f"TargetObject(\"{self.name}\")"
+
+    def for_include(self, file: "MakexFile"):
+        # return a target transformed for inclusion
+        raise NotImplementedError
 
 
 def resolve_target_output_path(ctx, target: TargetObject):
@@ -1659,7 +1589,7 @@ class MakexFileCycleError(MakexError):
         return string.getvalue()
 
 
-def find_makex_files(path, names):
+def find_makex_files(path, names) -> Optional[Path]:
     for name in names:
         check = path / name
         if check.exists():
@@ -1674,43 +1604,75 @@ class ArchiveCommand:
     location: FileLocation
 
 
-class FileObject(FileProtocol):
-    path: PathLike
-    location: FileLocation
+class IncludeFunction(Protocol):
+    def __call__(
+        self,
+        ctx: Context,
+        workspace: Workspace,
+        base: Path,
+        search_path: str,
+        makex_file: "MakexFile",
+        location: FileLocation,
+        search=False,
+        globals=None,
+        stack=None,
+        targets=False,
+        required=True,
+    ) -> tuple[types.ModuleType, "MakexFile"]:
+        pass
 
 
-SENTINEL = object()
-
-
-class EnvironmentVariableProxy:
-    def __init__(self, env):
-        self.__env = env
-        # record usages of environment variables so we can include it as part of the hashing of targets/makex files.
-        self.__usages: dict[str, str] = {}
-
-    def get(self, key, default=SENTINEL, _location_: FileLocation = None):
-        item = self.__env.get(key, default)
-        if item is None or item is SENTINEL:
-            raise PythonScriptError(f"Enviroment variable {key} not defined.", _location_)
-
-        self.__usages[key] = item
-
-        return StringValue(item, location=_location_)
-
-    def _usages(self):
-        return self.__usages
+def _process_output(
+    output: Union[StringValue, Glob],
+    target_name,
+    location,
+) -> Union[PathElement, PathObject, Glob]:
+    # Mostly return the outputs, as is, for later evaluation. Check for invalid arguments early.
+    if isinstance(output, StringValue):
+        return PathElement(output, location=output.location)
+    elif isinstance(output, Glob):
+        # append glob as is. we'll resolve later.
+        return output
+    elif isinstance(output, PathObject):
+        return output
+    elif isinstance(output, PathElement):
+        return output
+    else:
+        raise PythonScriptError(
+            f"Invalid output type {type(output)} in output list for target {target_name}: {output}",
+            location
+        )
 
 
 class MakexFileScriptEnvironment(ScriptEnvironment):
+    class Task:
+        def __init__(self, env):
+            self.env = env
+
+        def __getitem__(self, item):
+            if item not in {"path"}:
+                raise AttributeError
+
+            return self.env.path
+
+        def __call__(self, *args, **kwargs):
+            pass
+
     def __init__(
         self,
         ctx,
         directory: Path,
         path: Path,
         workspace: Workspace = None,
-        targets: dict[str, TargetObject] = None,
-        makex_file: "MakexFile" = None,
+        targets: Optional[dict[str, TargetObject]] = None,
+        macros: Optional[dict[str, Callable]] = None,
+        makex_file: Optional["MakexFile"] = None,
+        stack: Optional[list[str]] = None, # stack of paths reaching the file
+        include_function: Optional[IncludeFunction] = None,
+        globals=None,
     ):
+        self.stack = stack or [path.as_posix()]
+
         self.directory = directory
 
         # path to the actual makex file
@@ -1721,23 +1683,49 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         self.environment = EnvironmentVariableProxy(ctx.environment)
         self.targets = {} if targets is None else targets
         #self.variables = []
-        self.build_paths = []
+        self.build_paths: list[Path] = []
         self.workspace = workspace
         self.makex_file = makex_file or None
 
+        self._include_function = include_function
+        self._globals: dict[str, Any] = globals or {}
+        self.macros: dict[str, Callable] = {} if macros is None else macros
+        self.block_registration = False
+        self.includes: set[MakexFile] = set()
+
     def globals(self):
+        parent = super().globals()
+
         g = {
+            #**self._globals,
+            **parent,
+            TARGETS_MODULE_VARIABLE: self.targets,
+            MACROS_MODULE_VARIABLE: self.macros,
             "Environment": self.environment, #"pattern": wrap_script_function(self._pattern),
+            "ENVIRONMENT": self.environment,
             "target": wrap_script_function(self._function_target),
-            "Target": wrap_script_function(self._function_Target),
+
+ # TODO: declare new aliases:
+            "Task": wrap_script_function(self._function_task),
+            "task": wrap_script_function(self._function_task),
+            _TARGET_REFERENCE_NAME: wrap_script_function(self._function_Target),
+            #TODO: define a Target object for type references
+            #"Target": wrap_script_function(self._function_Target),
+            _MACRO_DECORATOR_NAME: self._decorator_macro, #"macro": Decorator,
         }
+
+        if INCLUDE_ENABLED:
+            g["include"] = self._function_include
+
         # path utilities
         g.update(
             {
-                "path": wrap_script_function(self._function_path),
-                # TODO: path() is a common variable (e.g. in a loop), and as an argument (to target) and Path() object. confusing.
+                # DONE: path() is a common variable (e.g. in a loop), and as an argument (to target) and Path() object. confusing.
                 #  alias to cache(), or output()
-                #"cache": wrap_script_function(self.build_path),
+                "path": wrap_script_function(self._function_path),
+                "task_path": wrap_script_function(self._function_task_path),
+                # cache is a bit shorter than task_path
+                "cache": wrap_script_function(self._function_task_path),
                 #"output": wrap_script_function(self.build_path),
                 "Path": wrap_script_function(self._function_Path),
                 "source": wrap_script_function(self._function_source),
@@ -1755,6 +1743,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             {
                 "print": wrap_script_function(self._function_print),
                 "shell": wrap_script_function(self._function_shell),
+                # TODO: deprecate sync
                 "sync": wrap_script_function(self._function_sync),
                 "mirror": wrap_script_function(self._function_sync),
                 "execute": wrap_script_function(self._function_execute),
@@ -1774,17 +1763,107 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             g["home"] = wrap_script_function(self._function_home)
         return g
 
+    @dataclass
+    class MacroContext:
+        target: Callable
+        path: Callable
+        source: Callable
+
+    def _decorator_macro(self, fn, _location1_=None):
+        # @macro decorator implementation
+        # wrap functions to handle location argument
+        # TODO: macros should be keyword only.
+        def f(
+            *args,
+            _location_=None,
+            **kwargs,
+        ):
+            if args:
+                raise PythonScriptError("Macros must be called with keyword arguments.", _location_)
+
+            debug("Calling macro %s %s %s %s", fn, args, kwargs, _location_)
+            return fn(*args, **kwargs)
+
+        trace(f"Declaring macro: %s: %s (%s)", self.path, fn.__name__, _location1_)
+        self.macros[fn.__name__] = f
+        f.__name__ = fn.__name__
+
+        # slighly similar way to achieve the same goal:
+        #self._globals[fn.__name__] = f
+        #import inspect
+        #inspect.stack()[1][0].f_globals.update()
+        return f
+
+    if False:
+
+        def has_global(self, name):
+            print("check has global", name)
+            return name in self._globals
+
+        def get_global(self, name):
+            return self._globals.get(name)
+
+    def _function_include(
+        self,
+        path: StringValue,
+        search=False,
+        tasks=False,
+        _globals=None,
+        required=True,
+        _location_=None,
+        **kwargs
+    ):
+
+        # _globals argument is passed in via ast modifications
+        if self._include_function is None:
+            raise PythonScriptError("Can't include from this file.", _location_)
+
+        debug("Including %s ...", path)
+        module, file = self._include_function(
+            ctx=self.ctx,
+            workspace=self.workspace,
+            base=self.directory,
+            makex_file=self.makex_file,
+            search_path=path,
+            search=search,
+            globals=_globals,
+            location=_location_,
+            targets=tasks,
+            required=required,
+            extra=kwargs,
+        )
+
+        if module is None:
+            debug("Skipping missing optional makex file.")
+            return None
+
+        del module.__builtins__
+        _macros = getattr(module, MACROS_MODULE_VARIABLE)
+        debug("Importing macros from %s: %s", path, _macros.keys())
+
+        _globals.update(_macros)
+
+        self.includes.add(file)
+
+        if tasks:
+            trace("Adding targets from included file: %s", module._TARGETS_.keys())
+            self.targets.update(module._TARGETS_)
+
     def _function_expand(self, string: StringValue, location: FileLocation):
         return Expansion(context=self.ctx, string=string, location=location)
 
-    def _function_home(self, user=None, location=None):
+    def _function_home(self, *path, user=None, location=None):
         if user:
             arg = f"~{user}"
         else:
             arg = "~"
         home = expanduser(arg)
 
-        return PathElement(arg, resolved=Path(home), location=location)
+        _path = Path(home)
+        if path:
+            _path =  _path.joinpath(*path)
+
+        return PathElement(arg, resolved=_path, location=location)
 
     def _function_find(
         self, path: PathLikeTypes, expr: Union[Glob, RegularExpression] = None, location=None
@@ -1805,13 +1884,13 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
 
     def _function_environment(
         self,
-        dictionary: Mapping[StringValue, Union[PathLikeTypes, StringValue]] = None,
+        dictionary: Optional[dict[StringValue, Union[PathLikeTypes, StringValue]]] = None,
         location: FileLocation = None,
         **kwargs: Union[PathLikeTypes, StringValue],
     ):
-        dictionary = dictionary or {}
-        dictionary.update(**kwargs)
-        return SetEnvironment(dictionary, location=location)
+        _dictionary = dictionary or {}
+        _dictionary.update(**kwargs)
+        return SetEnvironment(_dictionary, location=location)
 
     def _function_Target(self, name, path: PathLikeTypes = None, location=None, **kwargs):
         # absorb kwargs so we can error between Target and target
@@ -1819,9 +1898,21 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
 
     def _function_path(
         self,
+        *args,
+        **kwargs,
+    ):
+        location = kwargs.get("location", "")
+
+        self.ctx.ui.warn(
+            f"The path() function is deprecated. Please change to using task_path() instead. {location}"
+        )
+        return self._function_task_path(*args, **kwargs)
+
+    def _function_task_path(
+        self,
         name,
         path: PathLikeTypes = None,
-        variants: list[str] = None,
+        variants: Optional[list[str]] = None,
         location=None,
     ):
         if isinstance(path, PathElement):
@@ -1832,7 +1923,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             _path = self.directory
         else:
             raise PythonScriptError(f"Invalid path value:{type(path)}", location)
-
         return create_build_path_object(
             self.ctx, target=name, path=_path, variants=variants, location=location
         )
@@ -1842,7 +1932,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             # XXX: No path. Return the source directory.
             return PathElement(*self.directory.parts, resolved=self.directory, location=location)
 
-        #parts = []
         for part in path:
             if not isinstance(part, StringValue):
                 raise PythonScriptError(
@@ -1850,7 +1939,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     getattr(part, "location", location)
                 )
 
-        #_path = resolve_path_parts(parts, self.directory, location)
         _path = resolve_path_parts_workspace(
             self.ctx, self.workspace, path, self.directory, location
         )
@@ -1858,8 +1946,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         # XXX: all of _path.parts is used, so it's fully absolute
         return PathElement(*path, resolved=_path, location=location)
 
-    def _function_Path(self, *path: PathLikeTypes, location=None):
-        #parts = []
+    def _function_Path(self, *path: StringValue, location=None):
         for part in path:
             if not isinstance(part, StringValue):
                 raise PythonScriptError(
@@ -1867,12 +1954,11 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     getattr(part, "location", location)
                 )
 
-        trace("Creating path: %s", path)
-        #_path = resolve_path_parts(parts, self.directory, location)
-
+        #trace("Creating path: %s", path)
         if True:
             _path = None
         else:
+            # TODO: handle resolving workspace paths here
             _path = resolve_path_parts_workspace(
                 self.ctx, self.workspace, path, self.directory, location
             )
@@ -1890,7 +1976,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     getattr(part, "location", location)
                 )
 
-        return ShellCommand(script, location)
+        return Shell(script, location)
 
     def _function_execute(
         self,
@@ -1900,7 +1986,8 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         **kwargs, #environment: dict[str, str] = None,
         #location=None,
     ):
-        environment = kwargs.get("environment", None)
+        environment = kwargs.pop("environment", None)
+        location = kwargs.pop("location", None)
 
         if isinstance(file, ListTypes):
             file = file[0]
@@ -1909,7 +1996,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             file,
             args,
             environment=environment,
-            location=kwargs.get("location", None),
+            location=location,
         )
 
     def _function_glob(self, glob: str, location=None):
@@ -1918,16 +2005,21 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
     def _function_print(self, *messages, location=None):
         return Print(messages, location)
 
-    def _function_write(self, destination: PathLikeTypes, data: StringValue = None, location=None):
+    def _function_write(
+        self,
+        destination: PathLikeTypes,
+        data: StringValue = None,
+        executable=False,
+        location=None
+    ):
         # contents=None for touch
-        return Write(destination, data=data, location=location)
+        return Write(destination, data=data, executable=executable, location=location)
 
     def _function_sync(
         self, source: list[AllPathLike], destination: PathLikeTypes = None, /, **kwargs
     ):
         location: FileLocation = kwargs.pop("location", None)
         exclude: list[Union[StringValue, Glob]] = kwargs.pop("exclude", None)
-        destination: PathLikeTypes = destination
         return Synchronize(
             source=source,
             destination=destination,
@@ -1954,7 +2046,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         self,
         requirements: list[Union[PathElement, StringValue, Glob, TargetReferenceElement]],
         location,
-    ) -> Iterable[Union[TargetReferenceElement, PathElement, Glob]]:
+    ) -> Iterable[Union[TargetReferenceElement, PathElement, Glob, FindFiles]]:
         # process the requires= list of the target() function.
         # convert to TargetReference where appropriate
         for require in requirements:
@@ -1989,7 +2081,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     yield PathElement(require, resolved=p, location=require.location)
 
             elif isinstance(require, TargetReferenceElement):
-                # append internal objects referring to files such as is find(), glob() and Target(); these will be expanded later
+                # append references which will be evaluated later
                 yield require
             elif isinstance(require, FindFiles):
                 # append internal objects referring to files such as is find(), glob() and Target(); these will be expanded later
@@ -2001,12 +2093,12 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
 
                 yield require
             elif isinstance(require, Glob):
+                # append internal objects referring to files such as is find(), glob() and Target(); these will be expanded later
                 if GLOBS_IN_INPUTS_ENABLED is False:
                     raise PythonScriptError(
                         "The glob function (glob) is not allowed in the target's requires list.",
                         require.location
                     )
-                # append internal objects referring to files such as is find(), glob() and Target(); these will be expanded later
                 yield require
             elif isinstance(require, PathElement):
                 yield require
@@ -2021,16 +2113,68 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     f"Invalid type {type(require)} in requires list. Got {require!r}.", location
                 )
 
+    class TargetArguments(TypedDict):
+        name: str
+        path: NotRequired[Path]
+        requires: NotRequired[list[str]]
+        runs: NotRequired[list]
+        actions: NotRequired[list]
+        outputs: NotRequired[list]
+        inputs: NotRequired[dict]
+        location: Required[FileLocation]
+        #**kwargs: Unpack[TargetArguments]
+        # NotRequired
+        #
+
     def _function_target(
-        self,
-        name,
-        *,
-        path=None,
-        requires=None,
-        runs=None,
-        outputs=None,
-        location: FileLocation = None,
+        self, #*args,
+        **kwargs: Unpack[TargetArguments],
     ):
+        location = kwargs.get("location", None)
+        self.ctx.ui.warn(
+            f"The target() function is deprecated. It will be removed by 2024-06. Please change to using task(steps=[]) instead. {location}"
+        )
+        steps = kwargs.pop("runs", None)
+        return self._function_task(steps=steps, **kwargs)
+
+    def _function_task(
+        self, #*args,
+        **kwargs: Unpack[TargetArguments],
+    ):
+        location = kwargs.pop("location", None)
+
+        if False:
+            arglen = len(args)
+            if not arglen:
+                pass
+            elif arglen == 3:
+                name, path, variants = args
+                return TargetReferenceElement(name, path, variants, location=location)
+            elif arglen == 2:
+                name, path = args
+                return TargetReferenceElement(name, path, location=location)
+            elif arglen == 1:
+                name = args[0]
+                return TargetReferenceElement(name, location=location)
+            else:
+                raise PythonScriptError(
+                    "Invalid number of arguments to create Target Reference. Expected name and optional path.",
+                    location=location
+                )
+
+        if self.block_registration:
+            trace("Registration of target blocked at %s", location)
+            return
+
+        #trace("Calling target() from %s", self.makex_file)
+        name = kwargs.pop("name", None)
+        path = kwargs.pop("path", None)
+        requires = kwargs.pop("requires", None)
+        runs = kwargs.pop("actions", None) or kwargs.pop("steps", None)
+        outputs = kwargs.pop("outputs", None)
+
+        if kwargs:
+            raise PythonScriptError(f"Unknown arguments to task(): {kwargs}", location)
 
         if name is None or name == "":
             raise PythonScriptError(f"Invalid target name {name!r}.", location)
@@ -2040,7 +2184,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         existing: TargetObject = self.targets.get(name, None)
         if existing:
             raise PythonScriptError(
-                f"Duplicate target name {name!r}. Already defined at {existing.location.path}:{existing.location.line}.",
+                f"Duplicate target name {name!r}. Already defined at {existing.location}.",
                 location
             )
 
@@ -2056,37 +2200,17 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         unnamed_outputs = outputs_dict.get(None)
 
         if outputs:
-
-            def process_output(
-                output: Union[StringValue, Glob],
-                location,
-            ) -> Union[PathElement, PathObject, Glob]:
-                # Mostly return the outputs, as is, for later evaluation. Check for invalid arguments early.
-                if isinstance(output, StringValue):
-                    return PathElement(output, location=output.location)
-                elif isinstance(output, Glob):
-                    # append glob as is. we'll resolve later.
-                    return output
-                elif isinstance(output, PathObject):
-                    return output
-                elif isinstance(output, PathElement):
-                    return output
-                else:
-                    raise PythonScriptError(
-                        f"Invalid output type {type(output)} in output list for target {name}: {output}",
-                        location
-                    )
-
             if isinstance(outputs, ListTypes):
-                for out in outputs:
-                    output = process_output(out, location)
+                for i, out in enumerate(outputs):
+                    output = _process_output(out, name, location)
                     _outputs.append(output)
                     unnamed_outputs.append(output)
+                    outputs_dict[i] = output
 
             elif NAMED_OUTPUTS_ENABLED and isinstance(outputs, dict):
                 # named outputs
                 for k, v in outputs.items():
-                    output = process_output(v, location)
+                    output = _process_output(v, name, location)
                     _outputs.append(output)
                     outputs_dict[k] = output
             else:
@@ -2111,32 +2235,10 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             makex_file=self.makex_file,
             location=location,
         )
+
         self.targets[name] = target
+        trace("Registered target %s in makexfile %s. %s ", target.name, self.makex_file, location)
         return None
-
-
-DISABLE_ASSIGNMENT_NAMES = {
-    "target",
-    "path",
-    "execute",
-    "shell",
-    "copy",
-    "print",
-    "Environment",
-    "environment",
-    "glob",
-    "pattern",
-    "input",
-    "inputs",
-    "output",
-    "outputs",
-    "find",
-    "Path",
-    "source",
-    "home",
-    "archive",
-    "sync"
-}
 
 
 class MakexFile:
@@ -2145,6 +2247,10 @@ class MakexFile:
 
     targets: dict[str, TargetObject]
 
+    macros: dict[str, Callable]
+
+    code: Optional[types.CodeType] = None
+
     def __init__(self, ctx, path: Path, targets=None, variables=None, checksum: str = None):
         self.ctx = ctx
         self.path = path
@@ -2152,27 +2258,39 @@ class MakexFile:
         self.targets = targets or {}
         self.variables = variables or []
         self.checksum = checksum
-        self.enviroment_hash = None
+        self.environment_hash = None
+        self.macros = {}
+
+        # list of paths this MakexFile imports or includes.
+        # TODO: Must be included in hash.
+        self.includes: list[MakexFile] = []
+
+    def hash_components(self):
+        yield f"version:{VERSION}"
+        yield f"environment:{self.environment_hash}"
+        yield f"makex-file:{self.checksum}"
+        for include in self.includes:
+            yield f"environment:include:{include.environment_hash}"
+            yield f"makex-file:include:{include.checksum}"
 
     def key(self):
         return str(self.path)
 
     @classmethod
-    def parse(cls, ctx: Context, path: Path, workspace: Workspace) -> "MakexFile":
-        debug("Started parsing makefile %s ...", path)
-
+    def preparse(cls, ctx: Context, path: Path, workspace: Workspace, include_function) -> ast.AST:
+        trace("PREPARSE %s", path)
         checksum = FileChecksum.create(path)
         checksum_str = str(checksum)
-
         makefile = cls(ctx, path, checksum=checksum_str)
-
         env = MakexFileScriptEnvironment(
             ctx,
             directory=path.parent,
             path=path,
             makex_file=makefile,
             targets=makefile.targets,
+            macros=makefile.macros,
             workspace=workspace,
+            include_function=include_function
         )
 
         _globals = {}
@@ -2181,18 +2299,144 @@ class MakexFile:
         if ENVIRONMENT_VARIABLES_IN_GLOBALS_ENABLED:
             _globals.update(ctx.environment)
 
-        script = PythonScriptFile(path, env, _globals)
+        posix_path = path.as_posix()
+        include_processor = ProcessIncludes(posix_path)
+
+        script = PythonScriptFile(
+            path, _globals, extra_visitors=[TransformGetItem(posix_path), include_processor]
+        )
         script.set_disabled_assignment_names(DISABLE_ASSIGNMENT_NAMES)
+
         with path.open("rb") as f:
-            script.execute(f)
+            return script.parse(f)
+
+    @classmethod
+    def execute(
+        cls,
+        ctx: Context,
+        path: Path,
+        workspace: Workspace,
+        node: ast.AST,
+        include_function,
+        globals=None,
+        importer=None
+    ) -> "MakexFile":
+        pass
+
+    @classmethod
+    def parse(
+        cls,
+        ctx: Context,
+        path: Path,
+        workspace: Workspace,
+        include_function,
+        globals=None,
+        importer=None
+    ) -> "MakexFile":
+        """
+
+        Globals may be passed in for uses such as include(). Globals dictionary shall contain task() and other defined functions.
+        When task is called in an included file, the task should register the including file. It's hacky, but it works.
+
+        :param ctx:
+        :param path:
+        :param workspace:
+        :param include_function:
+        :param globals:
+        :param importer:
+        :return:
+        """
+        debug("Started parsing makefile %s ...", path)
+
+        checksum = FileChecksum.create(path)
+        checksum_str = str(checksum)
+
+        # TODO: this needs to be refactored. we should create the makefile last.
+        makefile = cls(ctx, path, checksum=checksum_str)
+
+        env = MakexFileScriptEnvironment(
+            ctx,
+            directory=path.parent,
+            path=path,
+            makex_file=makefile,
+            targets=makefile.targets,
+            macros=makefile.macros,
+            workspace=workspace,
+            include_function=include_function
+        )
+
+        # reuse the globals, except for the one that defines a macro
+        # we want the target() and path() functions to work as they would in the includer.
+        # path should resolve relative to includer
+        # target() should be registered in includer
+
+        if globals:
+            _globals = {"FILE": path, **env.globals(), **globals}
+        else:
+            _globals = {"FILE": path, **env.globals()}
+
+        # force the use of the local environments macro decorator, ignoring anything passed in
+        _globals[_MACRO_DECORATOR_NAME] = env._decorator_macro
+
+        #debug("Globals before parse %s %s", path, _globals)
+
+        # add environment variables to makefiles as variables
+        if ENVIRONMENT_VARIABLES_IN_GLOBALS_ENABLED:
+            _globals.update(ctx.environment)
+
+        posix_path = path.as_posix()
+        if INCLUDE_ENABLED:
+            include_processor = ProcessIncludes(posix_path)
+        else:
+            include_processor = None
+
+        script = PythonScriptFile(
+            path,
+            _globals,
+            importer=importer,
+            pre_visitors=[include_processor] if INCLUDE_ENABLED else [],
+            extra_visitors=[TransformGetItem(posix_path)],
+            enable_imports=IMPORT_ENABLED,
+        )
+        script.set_disabled_assignment_names(DISABLE_ASSIGNMENT_NAMES)
+
+        # TODO: parse the file, find any includes, parse those and insert their asts before we execute.
+        with path.open("rb") as f:
+            tree = script.parse(f)
+
+        if False and INCLUDE_ENABLED:
+            asts = []
+            for search_path, location in include_processor.includes_seen:
+                trace("AST INCLUDE: %s", search_path)
+                asts += include_function(
+                    ctx, workspace, path.parent, search_path, location, search=True
+                )
+
+            InsertAST(path, asts).visit(tree)
+
+        makefile.macros = env.macros
+
+        # store a code object so we can reuse it
+        makefile.code = script.execute(tree)
+
+        makefile.includes.extend(env.includes)
 
         if HASH_USED_ENVIRONMENT_VARIABLES:
-            # hash the enviroment variable usages so targets change when they change.
+            # hash the environment variable usages so targets change when they change.
             usages = env.environment._usages()
             if usages:
-                makefile.enviroment_hash = target_hash(
+                makefile.environment_hash = target_hash(
                     "".join(f"{k}={v}" for k, v in sorted(usages.items()))
                 )
 
-        debug("Finished parsing makefile %s.", path)
+        debug(
+            "Finished parsing makefile %s: Macros: %s | Targets: %s",
+            path,
+            makefile.macros.keys(),
+            _globals[TARGETS_MODULE_VARIABLE].keys()
+        )
+        makefile.targets = _globals[TARGETS_MODULE_VARIABLE]
         return makefile
+
+    def __repr__(self):
+        return self.key()

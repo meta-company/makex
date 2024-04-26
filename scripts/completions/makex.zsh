@@ -12,9 +12,10 @@ _shtab_makex_commands() {
     "evaluate:"
     "inputs:"
     "outputs:"
-    "path:Get the output path of a target."
-    "run:Run a target or list of targets."
+    "path:Get the output path of a task."
+    "run:Run a task or list of tasks."
     "targets:"
+    "tasks:"
     "version:"
     "workspace:Print the current workspace, or the workspace detected at path."
   )
@@ -43,6 +44,7 @@ _shtab_makex_complete_options=(
 _shtab_makex_completions_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "--shell[]:shell:(bash zsh)"
+  "--internal[]"
   ":The output file to write the completions to. If not specified, will the completion will be written to standard out.:"
 )
 
@@ -71,25 +73,32 @@ _shtab_makex_outputs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "*--ignore[Specify file ignore patterns.]:ignore:"
   "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
-  "(*):targets:"
+  "(*):output_names:"
 )
 
 _shtab_makex_path_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "--real[Return cache path. This may be slower as it must resolve Workspaces.]"
-  ":Name and optional path of a target. \/\/path\:name, \/\/\:name, \:name are all valid.:"
+  ":Name and optional path of a task. \/\/path\:name, \/\/\:name, \:name are all valid.:"
 )
 
 _shtab_makex_run_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
-  "--directory[Change to directory before evaluating targets.]:directory:"
-  "--force[Always run all targets even if they don\'t need to be.]"
+  "--directory[Change to directory before evaluating tasks.]:directory:"
+  "--force[Always run all task even if they don\'t need to be.]"
   "--dry[Do a dry run. Nothing will be executed.]"
   "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
-  "(*):targets:_shtab_makex_complete_target"
+  "(*):tasks:_shtab_makex_complete_target"
 )
 
 _shtab_makex_targets_options=(
+  "(- : *)"{-h,--help}"[show this help message and exit]"
+  "--paths[Path to a makex file or directory]:paths:(absolute workspace relative None)"
+  "--prefix[]"
+  ":Path to a makex file or directory. The current directory is the default.:"
+)
+
+_shtab_makex_tasks_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "--paths[Path to a makex file or directory]:paths:(absolute workspace relative None)"
   "--prefix[]"
@@ -130,6 +139,7 @@ _shtab_makex() {
         path) _arguments -C -s $_shtab_makex_path_options ;;
         run) _arguments -C -s $_shtab_makex_run_options ;;
         targets) _arguments -C -s $_shtab_makex_targets_options ;;
+        tasks) _arguments -C -s $_shtab_makex_tasks_options ;;
         version) _arguments -C -s $_shtab_makex_version_options ;;
         workspace) _arguments -C -s $_shtab_makex_workspace_options ;;
       esac

@@ -7,10 +7,10 @@ from datetime import (
 from pathlib import Path
 from typing import Optional
 
-from makex._logging import debug
+from makex._logging import debug, info
 from makex.file_checksum import FileChecksum
 
-DATABASE_VERSION = 2
+DATABASE_VERSION = 3
 
 
 @contextmanager
@@ -28,6 +28,13 @@ def transaction(conn):
         conn.commit()
 
 
+def upgrade_3(backend: "SqliteMetadataBackend"):
+    result = backend._execute("DROP TABLE IF EXISTS files")
+    result = backend._execute(
+        "CREATE TABLE IF NOT EXISTS files (path TEXT, fingerprint TEXT, checksum_type TEXT, checksum TEXT,  date TEXT)"
+    )
+    backend._execute(f"PRAGMA user_version=3")
+
 class SqliteMetadataBackend:
     def __init__(self, path: Path):
         debug("Connecting to sqlite database at %s", path)
@@ -43,14 +50,18 @@ class SqliteMetadataBackend:
 
         # TODO: check user_version pragma to check if our schema is still valid
         version = self._get_one("PRAGMA user_version")
-        if version is not None:
-            debug("DB Version %s", version)
+
+        debug("Database version %s < %s", version, DATABASE_VERSION)
+
+        if version is not None and version > 0:
             version = int(version)
 
-            if version < DATABASE_VERSION:
-                debug("Upgrading database...")
+            if version == 2:
+                info("Upgrading database to version 3...")
                 # move any old database file before initialization
-                self.initialize()
+                #if version == 2:
+                upgrade_3(self)
+                version = 3
         else:
             self.initialize()
 
@@ -76,9 +87,11 @@ class SqliteMetadataBackend:
 
         return result
 
-    def has_target(self, target_hash: str) -> bool:
+    def has_target(self, target_key: str, target_hash: str) -> bool:
         # return true if the db has the target with a hash (it was executed).
-        count = self._get_one("SELECT count(*) FROM targets WHERE hash = ?", target_hash)
+        count = self._get_one(
+            "SELECT count(*) FROM targets WHERE key = ? AND hash = ?", target_key, target_hash
+        )
         if count:
             return True
 
@@ -99,16 +112,18 @@ class SqliteMetadataBackend:
 
         return False
 
-    def get_file_checksum(self, path:str, fingerprint:str) -> Optional[FileChecksum]:
+    def get_file_checksum(self, path: str, fingerprint: str) -> Optional[FileChecksum]:
         count = self._get_row(
-            "SELECT checksum_type, checksum FROM files WHERE path = ? AND fingerprint = ?", path, fingerprint
+            "SELECT checksum_type, checksum FROM files WHERE path = ? AND fingerprint = ?",
+            path,
+            fingerprint
         )
         if count is None:
             return None
 
         return FileChecksum(FileChecksum.Type(count[0]), count[1], fingerprint)
 
-    def put_file(self, path:str, fingerprint:str, checksum_type:str, checksum:str):
+    def put_file(self, path: str, fingerprint: str, checksum_type: str, checksum: str):
         # store checksums for input/output files (out of band)
         # tombstone/delete any other records for file
         time = datetime.now(timezone.utc)
@@ -116,7 +131,12 @@ class SqliteMetadataBackend:
         try:
             with transaction(self.con):
                 self._execute(
-                    "INSERT into files values (?, ?, ?, ?, ?)", path, fingerprint, checksum_type, checksum, time
+                    "INSERT into files values (?, ?, ?, ?, ?)",
+                    path,
+                    fingerprint,
+                    checksum_type,
+                    checksum,
+                    time
                 )
         except sqlite3.IntegrityError as e:
             raise e
@@ -139,6 +159,5 @@ class SqliteMetadataBackend:
     def clear(self):
 
         with self.con:
-            res = self.con.execute("delete from targets")
-            res = self.con.execute("delete from files")
-
+            res = self._execute("delete from targets")
+            res = self._execute("delete from files")

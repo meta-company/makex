@@ -17,11 +17,11 @@ from makex.constants import BUILT_IN_REFLINKS
 REFLINKS_ENABLED = False
 
 if BUILT_IN_REFLINKS:
-    from makex.reflink import reflink
+    from makex.file_cloning import clone_file
     REFLINKS_ENABLED = True
 else:
     try:
-        from reflink import reflink
+        from file_cloning import clone_file
         REFLINKS_ENABLED = True
     except ImportError:
         REFLINKS_ENABLED = False
@@ -108,7 +108,7 @@ def safe_reflink(src, dest):
     #    return
 
     try:
-        reflink(src, dest)
+        clone_file(src, dest)
     except IOError as reflink_error:
         # Fall back to old [reliable] copy function if we get an EINVAL error.
         if reflink_error.errno == errno.EINVAL:

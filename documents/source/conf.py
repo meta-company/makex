@@ -18,7 +18,7 @@ release = os.environ.get("RELEASE", "")
 version = os.environ.get("VERSION", "")
 
 # Change this to modify the prefix.
-html_baseurl = '/go/makex/'
+html_baseurl = '/makex/latest/'
 
 nitpick_ignore = [
     ('py:class', 'PathLike'),

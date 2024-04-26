@@ -1,5 +1,5 @@
-from makex.reflink import (
-    reflink,
+from makex.file_cloning import (
+    clone_file,
     supported_at,
 )
 
@@ -10,4 +10,4 @@ def test_reflink(tmp_path):
     a.write_text("a")
 
     if supported_at(tmp_path):
-        reflink(tmp_path / "a", tmp_path / "b")
+        clone_file(tmp_path / "a", tmp_path / "b")

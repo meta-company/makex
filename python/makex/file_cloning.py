@@ -1,9 +1,11 @@
 """
-Native python implementation of reflinks.
+Native python implementation of file cloning (aka reflinks).
 
 - In linux, this is done with an ioctl (ioctl_ficlonerange, )
 - Apple has a clonefile system call.
-- Windows has nothing.
+- Windows has DUPLICATE_EXTENTS_TO_FILE.
+
+The following filesystems support file cloning: bcachefs, btrfs, XFS, ZFS (unstable, 2.2.0+), OCFS2, APFS and ReFSv2.
 
 """
 
@@ -12,18 +14,19 @@ import os
 import sys
 from typing import Union
 
-REFLINK_SUPPORTED = False
+# True if the Operating has some support for a reflink like feature.
+SUPPORTED = False
 
 if sys.platform in {"linux"}:
     # XXX: Assume there is some support.
-    REFLINK_SUPPORTED = True
+    SUPPORTED = True
 
     import fcntl
 
     # TODO: Investigate FICLONERANGE.
     FICLONE = 0x40049409
 
-    def _reflink_platform(source, destination):
+    def _clone_file_platform(source, destination):
         result = -1
         try:
             with open(source) as s, open(destination, "w+") as d:
@@ -35,7 +38,9 @@ if sys.platform in {"linux"}:
         # TODO: handle errors from ioctl (man ioctl)
 
         # SEE: man ioctl_ficlone
-        if result == errno.EINVAL:
+        if result == 0:
+            return None
+        elif result == errno.EINVAL:
             # The filesystem does not support reflinking the ranges of the given files. This error can also appear if either
             # file descriptor represents a device, FIFO, or socket. Disk filesystems generally require the offset and length
             # arguments to be aligned to the fundamental block size.
@@ -119,29 +124,29 @@ elif sys.platform in {"darwin"}:
     LIBC_FALLBACK = "/usr/lib/libSystem.dylib"
 
     try:
-        clib = ctypes.CDLL(LIBC)
+        _libc = ctypes.CDLL(LIBC)
     except OSError as e:
         if e.errno != errno.ENOENT:
             raise e
         try:
             # NOTE: trying to bypass System Integrity Protection (SIP)
-            clib = ctypes.CDLL(LIBC_FALLBACK)
+            _libc = ctypes.CDLL(LIBC_FALLBACK)
         except OSError as e:
-            clib = object()
+            _libc = object()
 
-    if not hasattr(clib, "clonefile"):
-        REFLINK_SUPPORTED = False
+    if not hasattr(_libc, "clonefile"):
+        SUPPORTED = False
     else:
-        REFLINK_SUPPORTED = True
+        SUPPORTED = True
 
         _CHAR_P = ctypes.c_char_p
         _C_INT = ctypes.c_int
-        _CLONEFILE = clib.clonefile
-        _CLONEFILE.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-        _CLONEFILE.restype = ctypes.c_int
+        _clonefile = _libc.clonefile
+        _clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+        _clonefile.restype = ctypes.c_int
 
-        def _reflink_platform(source, destination):
-            result = _CLONEFILE(
+        def _clone_file_platform(source, destination):
+            result = _clonefile(
                 _CHAR_P(os.fsencode(source)),
                 _CHAR_P(os.fsencode(destination)),
                 _C_INT(0),
@@ -155,39 +160,38 @@ elif sys.platform in {"darwin"}:
                     None,
                     destination
                 )
+            return None
 
 elif sys.platform in {"win32"}:
-    REFLINK_SUPPORTED = False
+    SUPPORTED = False
 
 
-def reflink(source: Union[str, os.PathLike], destination: Union[str, os.PathLike]):
+def clone_file(source: Union[str, os.PathLike], destination: Union[str, os.PathLike]):
     """
     :raises [IOError]:
     :param source:
     :param destination:
-    :return:
+    :return: None
     """
-    source = os.fspath(source)
-    destination = os.fspath(destination)
-    _reflink_platform(source, destination)
+    _clone_file_platform(os.fspath(source), os.fspath(destination))
 
 
 def supported_at(path: Union[str, os.PathLike]) -> bool:
     """
-    :returns: `True` when a path on the filesystem supports reflinking, `False` otherwise.
+    :returns: `True` when a path on the filesystem supports file cloning, `False` otherwise.
     """
     # XXX: There's no way to check reflink support aside from testing it.
 
-    if REFLINK_SUPPORTED is False:
+    if SUPPORTED is False:
         return False
 
-    a = os.path.join(path, "__________________________a__________________________")
-    b = os.path.join(path, "__________________________b__________________________")
+    a = os.path.join(path, "___a___")
+    b = os.path.join(path, "___b___")
 
     with open(a, 'w+') as f:
         f.write("")
     try:
-        _reflink_platform(a, b)
+        _clone_file_platform(a, b)
         return True
     finally:
         os.unlink(a)

@@ -67,7 +67,7 @@ ABSOLUTE_PATHS_ENABLED = _get_bool("ABSOLUTE_PATHS_ENABLED", True)
 SHELL_FUNCTION_ENABLED = _get_bool("SHELL_FUNCTION_ENABLED", True)
 
 # Enable dictionaries/named outputs.
-NAMED_OUTPUTS_ENABLED = False
+NAMED_OUTPUTS_ENABLED = True
 
 # Enable embedding various paths in strings.
 # This should not be enabled until we carefully work in late string (joined or concatenated) evaluation
@@ -80,6 +80,13 @@ ENABLE_PATH_TO_STRING = _get_bool("ENABLE_PATH_TO_STRING", DEVELOPMENT_ENABLED)
 # We will likely set this to False by default.
 TARGET_PATH_ENABLED = _get_bool("TARGET_PATH_ENABLED", True)
 
+INCLUDE_ENABLED = _get_bool("INCLUDE_ENABLED", True)
+
+# allow includes to make an `include()` call.
+INCLUDE_MULTIPLE_LEVEL_ENABLED = False
+
+IMPORT_ENABLED = _get_bool("IMPORT_ENABLED", False)
+
 # Strict mode
 # - Disable the shell (unless really explicit)
 # - Make sure all used files are declared (or just handle this implicitly)
@@ -88,7 +95,7 @@ TARGET_PATH_ENABLED = _get_bool("TARGET_PATH_ENABLED", True)
 #   - Any paths of required targets become a dependency and would break composition.
 # - If shell must be enabled, disable __str__ on any PathObject so they can't be hidden in shell strings.
 #   - add concatenate() to explicitly concatenate [shell] strings and any paths they may require.
-STRICT_MODE = False
+STRICT_MODE = _get_bool("STRICT_MODE", False)
 
 if STRICT_MODE:
     SHELL_FUNCTION_ENABLED = False

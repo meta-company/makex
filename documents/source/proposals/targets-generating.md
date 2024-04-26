@@ -7,6 +7,8 @@ aggregate() is a another function name proposed.
 
 TODO: runs list?  generated target run list is run after all the dependencies. 
 
+TODO: how do we aggregate outputs?
+
 An example with c files:
 
 ```python
@@ -17,7 +19,7 @@ def clang_compile(target, index, item: Path):
         requires=[
             item,
         ],
-        runs=[
+        steps=[
             execute("clang", "-o", target.path / file_name, item)
         ]
     )
@@ -41,7 +43,7 @@ def article_generator(target, index, item: Path):
     out = source("src/articles/published_html") / item.name.replace('.md', ".html")
     return target(
         name=name,
-        runs=[
+        steps=[
             shell(
                 f"./static_web_builder/markdownrenderer.py --jinja-template src/templates/article.jinja {article} {out}"
             )

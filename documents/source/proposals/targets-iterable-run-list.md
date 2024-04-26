@@ -1,6 +1,6 @@
 # Proposal: Iterable Run list
 
-A feature is proposed which callables passed to runs can be a generator function.
+A feature is proposed which callables passed to the target runs argument can be a generator function.
 
 Pros:
 
@@ -22,6 +22,6 @@ target(
     requires=[
         glob(""),
     ],
-    runs=iterator,
+    steps=iterator,
 )
 ```

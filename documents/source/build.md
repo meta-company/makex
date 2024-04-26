@@ -24,7 +24,7 @@ python -m build source
 
 ## Nuitka
 
-There's a target in Makex file to build itself with nuitka.
+There's a task in Makex file to build itself with nuitka.
 
 ```shell
 

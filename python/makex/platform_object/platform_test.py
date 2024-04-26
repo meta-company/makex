@@ -10,6 +10,6 @@ def test():
     assert test
 
     test = obj.os_type == "linux" and obj.architecture == "x86"
-    assert test.evaluate(platform)
     # test explicit and implicit evaluation
+    assert test.evaluate(platform)
     assert test

@@ -37,9 +37,10 @@ from makex.workspace import (
 )
 
 if BUILT_IN_REFLINKS:
-    import makex.reflink as reflink
+    import makex.file_cloning as reflink
 else:
-    import reflink
+    import file_cloning
+
 
 @dataclass
 class Context:

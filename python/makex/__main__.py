@@ -24,7 +24,10 @@ from typing import (
     Union,
 )
 
-from makex._logging import initialize_logging
+from makex._logging import (
+    initialize_logging,
+    trace,
+)
 from makex.build_path import get_build_path
 from makex.colors import (
     Colors,
@@ -32,30 +35,31 @@ from makex.colors import (
     NoColors,
 )
 from makex.configuration import (
+    ConfigurationError,
     collect_configurations,
     evaluate_configuration_environment,
     read_configuration,
 )
 from makex.constants import (
     CONFIGURATION_ARGUMENT_ENABLED,
+    DIRECT_REFERENCES_TO_MAKEX_FILES,
     WORKSPACE_ARGUMENT_ENABLED,
 )
 from makex.context import Context
 from makex.errors import (
     CacheError,
+    Error,
     ExecutionError,
     GenericSyntaxError,
 )
 from makex.executor import Executor
 from makex.flags import VARIANTS_ENABLED
-from makex.makex_file import (
-    MakexFileCycleError,
-    ResolvedTargetReference,
-)
+from makex.makex_file import MakexFileCycleError
 from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
 )
+from makex.makex_file_types import ResolvedTargetReference
 from makex.python_script import (
     PythonScriptError,
     PythonScriptFileError,
@@ -67,7 +71,7 @@ from makex.run import (
 from makex.target import EvaluatedTargetGraph
 from makex.ui import (
     UI,
-    isansitty,
+    is_ansi_tty,
     pretty_makex_file_exception,
 )
 from makex.version import VERSION
@@ -108,7 +112,7 @@ class ParsedScope:
 def is_color_enabled(color_argument: Literal["no", "auto", "off", "on", "yes"]):
     color_argument = color_argument.lower()
     if color_argument == "auto":
-        return isansitty()
+        return is_ansi_tty()
     elif color_argument in {"no", "off"}:
         return False
     elif color_argument in {"yes", "on"}:
@@ -265,7 +269,7 @@ def parser(cache: Path = None, documentation: bool = True):
 
     parser = ArgumentParser(
         prog="makex",
-        description="""Makex command line program.""",
+        description="""Makex command line program.\n\nSee https://meta.company/go/makex for the latest documentation.""",
         epilog="""""", #parents=[base_parser],
     )
     _add_global_arguments(parser, cache, documentation)
@@ -288,24 +292,26 @@ def parser(cache: Path = None, documentation: bool = True):
     ######### run
     subparser = subparsers.add_parser(
         "run",
-        help="Run a target or list of targets.",
-        description="Run a target or list of targets.",
+        help="Run a task or list of tasks.",
+        description="Run a task or list of tasks.",
         parents=[base_parser],
     )
+    subparser.set_defaults(command_function=main_run)
+
     action = subparser.add_argument(
-        "targets",
+        "tasks",
         nargs="+",
     )
     action.complete = COMPLETE_TARGET
     subparser.add_argument(
         "--directory",
-        help="Change to directory before evaluating targets.",
+        help="Change to directory before evaluating tasks.",
     ) #"-C",
 
     subparser.add_argument(
         "--force",
         action="store_true",
-        help="Always run all targets even if they don't need to be.",
+        help="Always run all task even if they don't need to be.",
     ) #"-f",
 
     subparser.add_argument(
@@ -338,26 +344,25 @@ def parser(cache: Path = None, documentation: bool = True):
     ######## path
     subparser = subparsers.add_parser(
         "path",
-        help="Get the output path of a target.",
-        description="Get the output path of a target.",
+        help="Get the output path of a task.",
+        description="Get the output path of a task.",
         parents=[base_parser],
     )
     subparser.add_argument(
-        "target",
-        help="Name and optional path of a target. //path:name, //:name, :name are all valid."
+        "task", help="Name and optional path of a task. //path:name, //:name, :name are all valid."
     )
-    # XXX: enable this whenw e
     subparser.add_argument(
         "--real",
         action="store_true",
         help="Return cache path. This may be slower as it must resolve Workspaces.",
         default=False,
     ) #"-r",
+    subparser.set_defaults(command_function=main_get_path)
 
     ######## dot
     subparser = subparsers.add_parser(
         "dot",
-        help="Create a dot depedency graph of targets. Printed to standard output.",
+        help="Create a dot dependency graph of tasks. Printed to standard output.",
         parents=[base_parser],
     )
     subparser.add_argument("targets", nargs="+")
@@ -378,18 +383,21 @@ def parser(cache: Path = None, documentation: bool = True):
     ######## affected
     subparser = subparsers.add_parser(
         "affected",
-        help="Return a list of targets affected by changes to the specified files.",
+        help="Return a list of tasks affected by changes to the specified files.",
         parents=[base_parser],
     )
+    subparser.set_defaults(command_function=main_affected)
     subparser.add_argument("files", nargs="+")
+
     add_threads_argument(subparser)
 
     ######## inputs
     subparser = subparsers.add_parser(
         "inputs",
-        help="Return the input files of a target. Evaluates the file.",
+        help="Return the input files of a task. Evaluates the file.",
         parents=[base_parser],
     )
+    subparser.set_defaults(command_function=main_get_inputs)
     subparser.add_argument(
         "--ignore",
         nargs="*",
@@ -402,16 +410,18 @@ def parser(cache: Path = None, documentation: bool = True):
     ######## outputs
     subparser = subparsers.add_parser(
         "outputs",
-        help="Return the output files of a target. Evaluates the file.",
+        help="Return the output files of a task. Evaluates the file.",
         parents=[base_parser],
     )
+    subparser.set_defaults(command_function=main_get_outputs)
     subparser.add_argument(
         "--ignore",
         nargs="*",
         action="append",
         help="Specify file ignore patterns.",
     )
-    subparser.add_argument("targets", nargs="+")
+    subparser.add_argument("output_names", nargs="+")
+
     add_threads_argument(subparser)
 
     ######## evaluate
@@ -428,10 +438,12 @@ def parser(cache: Path = None, documentation: bool = True):
 
     ######### targets subcommand
     subparser = subparsers.add_parser(
-        "targets",
+        "tasks",
+        aliases=["targets"], # TODO: remove this.
         parents=[base_parser],
         help="Generate list of targets parsed from the makex file found in path.",
     )
+    subparser.set_defaults(command_function=main_targets)
     subparser.add_argument(
         "path",
         nargs="?",
@@ -456,12 +468,15 @@ def parser(cache: Path = None, documentation: bool = True):
         description="Generate completion files for shells.",
         help="Generate completion files for shells.",
     )
+    subparser.set_defaults(command_function=main_completions)
+
     #if HAS_SHTAB:
     #    shtab.add_argument_to(
     #        subparser, option_string=["--shell"], parent=parser, preamble=PREAMBLE
     #    ) # magic!
     #else:
     subparser.add_argument("--shell", choices=["bash", "zsh"])
+    subparser.add_argument("--internal", action="store_true", default=False)
 
     subparser.add_argument(
         "file",
@@ -476,6 +491,8 @@ def parser(cache: Path = None, documentation: bool = True):
         description="Print the current workspace, or the workspace detected at path.",
         help="Print the current workspace, or the workspace detected at path.",
     )
+    subparser.set_defaults(command_function=main_workspace)
+
     subparser.add_argument(
         "path",
         nargs="?",
@@ -488,6 +505,8 @@ def parser(cache: Path = None, documentation: bool = True):
         parents=[base_parser],
         help="Print completions for the specified input. This is used for shell completions.",
     )
+    subparser.set_defaults(command_function=main_complete)
+
     subparser.add_argument(
         "string",
         nargs="?",
@@ -499,8 +518,15 @@ def parser(cache: Path = None, documentation: bool = True):
         "version",
         help="Print the makex version",
     )
+    subparser.set_defaults(command_function=main_version)
 
     return parser
+
+
+def _kill_running_processes():
+    # XXX: send a signal to any processes we created.
+    for pid in get_running_process_ids():
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
 
 
 def _handle_signal_interrupt(_signal, frame):
@@ -508,11 +534,7 @@ def _handle_signal_interrupt(_signal, frame):
     # self.pool.shutdown()
     # self.pool.shutdown(cancel_futures=True)
     print('You pressed Ctrl+C or the process was interrupted!')
-
-    # XXX: send a signal to any processes we created.
-    for pid in get_running_process_ids():
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
-
+    _kill_running_processes()
     sys.exit(-1)
 
 
@@ -522,10 +544,8 @@ def _handle_signal_terminate(_signal, frame):
     # self.pool.shutdown(cancel_futures=True)
     print('You pressed Ctrl+C or the process was interrupted!')
 
-    # XXX: send a signal to any processes we created.
-    for pid in get_running_process_ids():
-        # send a kill because it's more reliable.
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    # send a kill because it's more reliable.
+    _kill_running_processes()
 
     sys.exit(-1)
 
@@ -588,14 +608,12 @@ def _find_files(path, names: set[str]):
 
 
 def find_makex_files(path, names):
-    checked = []
-    for file in path.iterdir():
-        if file.name in names:
-            return file, None
-        else:
-            checked.append(file)
+    for name in names:
+        file = path.joinpath(name)
+        if file.exists():
+            return file
 
-    return None, checked
+    return None
 
 
 def early_ui_printer(max_level: int, colors: ColorsNames):
@@ -666,13 +684,18 @@ def init_context_standard(cwd, args):
         early_ui(
             f"Evaluating environment from configuration: {configuration.environment}...", level=1
         )
-        configuration_environment = evaluate_configuration_environment(
-            shell=configuration.shell or Context.shell,
-            env=configuration.environment,
-            current_enviroment=current_enviroment,
-            cwd=cwd,
-            run=run,
-        )
+        try:
+            configuration_environment = evaluate_configuration_environment(
+                shell=configuration.shell or Context.shell,
+                env=configuration.environment,
+                current_enviroment=current_enviroment,
+                cwd=cwd,
+                run=run,
+            )
+        except ConfigurationError as e:
+            early_ui(e, error=True)
+            sys.exit(-1)
+
         if configuration_environment:
             early_ui(f"Environment from configuration: {configuration_environment}", level=1)
             current_enviroment.update(configuration_environment)
@@ -723,6 +746,7 @@ def parse_target(ctx, base, string, check=True) -> Optional[ResolvedTargetRefere
     :param check:
     :return:
     """
+
     # resolve the path/makefile?:target_or_build_path name
     # return name/Path
     parts = string.split(":", 1)
@@ -735,30 +759,32 @@ def parse_target(ctx, base, string, check=True) -> Optional[ResolvedTargetRefere
             sys.exit(-1)
 
         if path.parts and path.parts[0] == "//":
-            path = ctx.workspace_object.path / path
+            trace("Translate workspace path %s %s", path, ctx.workspace_object.path)
+            path = ctx.workspace_object.path.joinpath(*path.parts[1:])
         elif not path.is_absolute():
             path = base / path
-
-        if path.is_symlink():
+        elif path.is_symlink():
             path = path.readlink()
     else:
         target = parts[0]
         path = base
 
+    #trace("Parse target %s -> %s:%s %s %s", string, target, path, parts, path.parts)
     if path.is_dir():
+        #if check:
+        # check for Build/Makexfile in path
+        file = find_makex_files(path, names=ctx.makex_file_names)
+        if file is None:
+            ctx.ui.print(f"Makex file does not exist for target specified: {target}", error=True)
+            for check in ctx.makex_file_names:
+                ctx.ui.print(f"- Checked in {path/check}")
+            sys.exit(-1)
+    else:
+        if DIRECT_REFERENCES_TO_MAKEX_FILES is False:
+            raise Error(f"Path to target is not a directory. Got {path}.")
+        file = path
 
-        if check:
-            # check for Build/Makexfile in path
-            path, checked = find_makex_files(path, names=ctx.makex_file_names)
-            if path is None:
-                ctx.ui.print(
-                    f"Makex file does not exist for target specified: {target}", error=True
-                )
-                for check in checked:
-                    ctx.ui.print(f"- Checked in {check}")
-                sys.exit(-1)
-
-    return ResolvedTargetReference(target, path=path)
+    return ResolvedTargetReference(target, path=file)
 
 
 def main_clean(args, extra):
@@ -845,12 +871,12 @@ def main_get_path(args, extra):
     """
     cwd = Path.cwd()
     ctx = init_context_standard(cwd, args)
-    ref = parse_target(ctx, cwd, args.target)
+    ref = parse_target(ctx, cwd, args.task)
 
     #debug("Current environment: %s", pformat(os.environ.__dict__, indent=2))
 
     if ref is None:
-        print(f"Invalid target reference: {args.target!r}")
+        print(f"Invalid task reference: {args.task!r}")
         sys.exit(-1)
 
     target_input = ref.path
@@ -859,7 +885,6 @@ def main_get_path(args, extra):
     workspace = ctx.workspace_object
 
     if args.real:
-        # ignore all the other arguments because we're
         workspace = which_workspace(workspace.path, target_input)
 
     obj = get_build_path(
@@ -898,7 +923,46 @@ def main_get_outputs(args):
     :param args:
     :return:
     """
-    pass
+    cwd = Path.cwd()
+    ctx = init_context_standard(cwd, args)
+
+    target = parse_target(ctx, cwd, args.target)
+    ctx.graph = graph = TargetGraph()
+    ctx.ui.print(f"Current working directory: {ctx.colors.BOLD}{cwd}{ctx.colors.RESET}")
+
+    ctx.ui.print(f"Loading makex file at {target.path}")
+
+    result = parse_makefile_into_graph(ctx, target.path, graph)
+
+    if result.errors:
+        print_errors(ctx, result.errors)
+        sys.exit(-1)
+
+    t = graph.get_target(target)
+    if t is None:
+        ctx.ui.print(
+            f"Target \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
+            error=True
+        )
+        sys.exit(-1)
+
+    # XXX: don't execute anything, evaluate the target outputs manually
+    executor = Executor(ctx, workers=1, force=args.force)
+    evaluated, errors = executor._evaluate_target(t)
+
+    if len(errors):
+        print_errors(ctx, errors)
+        sys.exit(-1)
+
+    if args.output_names:
+        paths = []
+        for output_name in args.output_names:
+            output = evaluated.outputs.get(output_name)
+            paths.append(output.path)
+        print(" ".join(paths))
+    else:
+        for output in evaluated.outputs:
+            print(output.path)
 
 
 def main_targets(args, extra_args):
@@ -930,7 +994,7 @@ def main_targets(args, extra_args):
     else:
         _path = cwd
 
-    file, _ = find_makex_files(_path, ctx.makex_file_names)
+    file = find_makex_files(_path, ctx.makex_file_names)
 
     if not file:
         return sys.exit(-1)
@@ -973,7 +1037,7 @@ def _yield_targets(ctx, file, graph):
 
 
 def _find_makefile_and_yield(ctx, directory):
-    file, _ = find_makex_files(directory, ctx.makex_file_names)
+    file = find_makex_files(directory, ctx.makex_file_names)
 
     if not file:
         return None
@@ -996,6 +1060,8 @@ def main_workspace(args, extra_args):
 
 def main_complete(args, extra_args):
     """
+    TODO: rename to shell-complete
+
     Complete the specified argument (path/target/etc).
 
     :param args:
@@ -1196,7 +1262,7 @@ def main_completions(args, extra_args):
         file.parent.mkdir(parents=True, exist_ok=True)
         output = file.open("w")
 
-    if HAS_SHTAB is False:
+    if args.internal is False and HAS_SHTAB is False:
         COMPLETIONS_PACKAGE = "makex.data.completions"
         resource_name = f"makex.{args.shell}"
         # load static completions from data directory
@@ -1208,6 +1274,10 @@ def main_completions(args, extra_args):
         print(importlib.resources.read_text(COMPLETIONS_PACKAGE, resource_name), file=output)
         sys.exit(-1)
     else:
+        if HAS_SHTAB is False:
+            print("shtab is not installed. pip install shtab")
+            sys.exit(-1)
+
         from makex._shtab import PREAMBLE
         shell = args.shell
         _parser = parser(documentation=False)
@@ -1242,7 +1312,7 @@ def main_run(args, extra_args):
 
     targets = []
 
-    for target in args.targets:
+    for target in args.tasks:
         ref = parse_target(ctx, cwd, target)
         targets.append(ref)
 
@@ -1291,6 +1361,11 @@ def main_run(args, extra_args):
 
     try:
         executed, errors = executor.execute_targets(*targets_to_run)
+    except KeyboardInterrupt as e:
+        executor.stop.set()
+        _kill_running_processes()
+        sys.exit(-1)
+
     except IOError as e:
         exc_info = sys.exc_info()
         traceback.print_exception(*exc_info)
@@ -1314,6 +1389,7 @@ COMMANDS = {
     "complete": main_complete,
     "completions": main_completions,
     "version": main_version,
+    "outputs": main_get_outputs
 }
 
 
@@ -1352,7 +1428,7 @@ def main():
             yappi.start()
 
     try:
-        COMMANDS[args.command.replace("-", "_")](args, extra_args)
+        args.command_function(args, extra_args)
     finally:
         if args.profile:
             if args.profile_mode == "cprofile":

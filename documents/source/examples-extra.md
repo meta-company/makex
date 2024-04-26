@@ -9,32 +9,32 @@ A contrived example of a makex file:
 
 CUSTOM_BUILD_PATH = path("build")
 
-target(
+task(
     name="build",
     path=None or CUSTOM_BUILD_PATH,
     require=[
-        # Request a target called build in another file or directory.
-        Target("build", file_or_directory),
+        # Request a task called build in another file or directory.
+        Task("build", file_or_directory),
         
         
-        # A local target.
+        # A local task.
         ":local",
         
-        # A target somewhere else, in directory called folder.
+        # A task somewhere else, in directory called folder.
         "path/to/folder:build",
         
         # Require a file.
         file_path,
     ],
-    runs=[
+    steps=[
         # echo test > $CUSTOM_BUILD_PATH/test
         execute("echo", "test").with_environment({}).write_to(CUSTOM_BUILD_PATH / "test"),
          
         f"echo f > {CUSTOM_BUILD_PATH}/test",
         
-        # Call another target explicitly. 
-        # This will automatically append a requirement to the target, but it will not run it until we reach here
-        Target("other", file_or_directory),
+        # Call another task explicitly. 
+        # This will automatically append a requirement to the task, but it will not run it until we reach here
+        Task("other", file_or_directory),
     ],
     
     outputs=[
@@ -43,7 +43,7 @@ target(
     ]
 )
 
-target(
+task(
     name="test",
     require=[
         ":build"
@@ -112,11 +112,11 @@ VARIABLE = "output-file"
 # create a local build path; separate for each platform X optimization
 BUILD = path(variants=["platform","optimization"])
 
-# default target. all things are built.
-target(requires=[target("*")])
+# default task. all things are built.
+task(requires=[task("*")])
 
-# each target is given a separate build path
-target(
+# each task is given a separate build path
+task(
     id="",
     path="",
     
@@ -125,21 +125,21 @@ target(
     variants=[Variant("optimization").one_of("linux")],
     
     requires=[
-        Target("target", file_or_directory, variants=Variant("optimization")),
+        Task("task", file_or_directory, variants=Variant("optimization")),
         file_or_directory,
     ],
-    runs=[
+    steps=[
         # echo test > BUILD
         execute("echo", "test", output=BUILD/variable),
-        copy(target.outputs),
+        copy(task.outputs),
         
-        build_path(target("target")),
+        build_path(task("task")),
         
         # mangle the {BUILD} variable to $$$$$$BUILD$$$$$$$ and replace when we actually run 
         f"echo f > {BUILD}/{VARIABLE} ",
         
         
-        # not needed:call("target", file_or_directory),
+        # not needed:call("task", file_or_directory),
     ],
     
     outputs=[
@@ -149,7 +149,7 @@ target(
 )
 
 # Build an archive
-target(
+task(
     id="archive",
     requires=[
         glob(""),
@@ -157,7 +157,7 @@ target(
         
         find("test/tst", name=regexp(), type="fsd"),
     ],
-    runs=[
+    steps=[
         # make a standard source folder name-version which we will archive
         #folder(BUILD/"folder/project-{VERSION}"),
         

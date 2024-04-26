@@ -1,4 +1,4 @@
-(actions)=
+(creating-actions)=
 # Creating Actions
 
 TODO: This needs to be fleshed out more with argument processing.
@@ -34,11 +34,11 @@ class CustomScript(Action):
         # return a URL we can open to learn more about the command
         pass
     
-    def run(self, ctx, target):
+    def run(self, ctx, task):
         # you can do anything here that you can do in python
         # use the run() function to run stuff while handling stdout properly
-        # target.path is a Path object represnting the output path
-        # target.input_path is a Path object representing the input path
+        # task.path is a Path object represnting the output path
+        # task.input_path is a Path object representing the input path
         
         # a dictionary of all arguments passed to the function
         # the values are resolved as necessary *before* this is run

@@ -43,13 +43,13 @@ In other words, variants in child Makex files inherit those of all the parents.
 
 If it is still not found after this search, an error is raised.
 
-All the current variants of Makex file all the way to the Makex file of the root target are in a variable VARIANTS.
+All the current variants of Makex file all the way to the Makex file of the root task are in a variable VARIANTS.
 
-Variants can be specified on the command line or targets.
+Variants can be specified on the command line or tasks.
 
 ```shell
 
-makex run path/to/target?optimization=best
+makex run path/to/task?optimization=best
 ```
 
 
@@ -74,8 +74,13 @@ variant(
     #default=f"{E.PYTHON}", # environment variable must be set or
     # use the system to detect variants
     default=execute("python", "import sys; v=sys.version_info(); print(f\"{v.major}.{v.minor}\")"),
-    choices=["3.6", "3.9"],
-
+    choices=["system", "3.6", "3.9"],
+    choices={
+        "system": {},
+        "3.6": {},
+        "3.9": {},
+        "4.0": {},
+    },
     data={
         # merge in data
         **DATA,
@@ -93,10 +98,10 @@ variant(
             "binary": "/usr/bin/python3.6"
         },
         "4.0": {
-            # depend on file in workspace (if any targets produce them, build them first)
+            # depend on file in workspace (if any tasks produce them, build them first)
             #"binary": Path("//path/to/cpython/4.0/bin/python"),
-            # build the specified target to make binary (build them before running any targets depending on the variant)
-            "binary": Target("cpython", "//path/to/cpython/4.0").output["binary"],
+            # build the specified task to make binary (build them before running any tasks depending on the variant)
+            "binary": Task("cpython", "//path/to/cpython/4.0").output["binary"],
         }
     }
 )
@@ -111,13 +116,13 @@ print(f"Python {variant('python-version').data.binary}")
 
 PYTHON = variant('python-version').get("binary")
 
-target(
+task(
 
     # pex varies on the python variant
     #varies=["python"],
     # pex varies on the python variants
     variants=["python-version"],
-    runs=[
+    steps=[
         execute(PYTHON, "-V")
         ]
 )

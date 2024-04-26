@@ -19,12 +19,12 @@ TODO: provide built in tooling. load("//tools/makex/python/venv.mx.py","python_v
 python_venv_enter(environment=[":venv], )
 
 
-#target which creates a venv which we can use. similar args to target, but less.
-python_venv_target(
+#task which creates a venv which we can use. similar args to task, but less.
+python_venv_task(
   name="venv"
   requirements_files=[],
   packages=[], # list of packages we need to install
-  runs=[
+  steps=[
     # custom stuff to run after we have a venv inside a venv.
   ]
 )
@@ -52,7 +52,7 @@ This is a common problem with a number of tools (e.g. mypy); and oftentimes, the
 
 ### I see lines starting with `ERROR OUTPUT:` when running makex
 
-Makex prefixes any errors written to standard output by subprocesses with `ERROR OUTPUT:`. This helps identify problems quickly.
+Makex prefixes any errors written to the standard error output (stderr) by subprocesses with `ERROR OUTPUT:`. This helps identify problems quickly.
 
 If you don't want to see these messages, address the warnings, use a flag to quiet, or improve the executable you are trying to run.
 
@@ -62,21 +62,25 @@ Makex generates checksums of input/output files. At the moment, this is currentl
 
 It's usually best to just wait for the file hashing to complete for the set of input files.
 
-You may omit large output files from the Target's outputs and this will prevent hashing.
+You may omit large output files from the Task's outputs and this will prevent hashing.
+
+<!--
+offline checksumming
+-->
 
 ### Makex hangs while running a command
 
 NOTE: If a shell/execute/command waits for input, Makex will hang. This is by design. 
-Several excutables may be run in parallel, and it's indeterminable which
+Several executables may be run in parallel, and it is indeterminable which
 one needs which standard input.
 
 Repeat, all executables Makex runs must not require and wait user input (e.g. using readline()).
 
 Some steps to debug a hang:
 
-- {ref}`Increase your verbosity<increasing-verbosity>`, to see which commands are run.
-- Find the last thing running before makex hangs. Stop/cancel Makex (usually ctrl+c, but may depend on terminal).
-- If it's a shell/execute/command, check if running the command in another shell completes successfully.
+1. {ref}`Increase your verbosity<increasing-verbosity>`, to see which commands are run.
+2. Find the last thing running before makex hangs. Stop/cancel Makex (usually ctrl+c, but may depend on terminal).
+3. If it's a shell/execute/command, check if running the command in another shell completes successfully.
   - If the command hangs or waits for input, you'll need to figure out a way to make it run without waiting for input.
   - If the command completes, this may be a problem with Makex. 
 

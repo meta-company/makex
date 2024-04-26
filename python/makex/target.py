@@ -11,12 +11,14 @@ from typing import (
     Optional,
     Protocol,
     Type,
+    Union,
 )
 
 from makex._logging import (
     debug,
     trace,
 )
+from makex.constants import HASHING_ALGORITHM
 from makex.context import Context
 from makex.protocols import (
     CommandOutput,
@@ -27,6 +29,8 @@ from makex.python_script import FileLocation
 from makex.workspace import Workspace
 
 TargetKey = str
+
+HASH_FUNCTION = getattr(hashlib, HASHING_ALGORITHM, "sha1")
 
 
 class TargetBase(ABC):
@@ -89,20 +93,24 @@ class InternalAction:
 
 
 class Hasher:
-    def __init__(self, type=hashlib.shake_256):
-        self._hash: hashlib.shake_256 = type()
+    def __init__(self, type=HASH_FUNCTION):
+        self._hash = type()
 
     def update(self, string: str):
         self._hash.update(string.encode("ascii"))
 
     def hex_digest(self, length=20):
-        return self._hash.hexdigest(length)
+        return self._hash.hexdigest() #.hexdigest(length)
 
 
 class MakexFileProtocol(Protocol):
     path: str
     checksum: str
-    enviroment_hash: str
+    environment_hash: str
+    includes: list[str]
+
+    def hash_components(self) -> list[str]:
+        ...
 
 
 @dataclass
@@ -110,7 +118,7 @@ class EvaluatedTarget(TargetBase):
     """
     An "evaluated" target.
 
-    All the properties/attributes in this type are resolved.
+    All the properties/attributes in this type have been evaluated or are resolved.
 
     Paths are resolved to absolute. TODO: They should retain their FileLocation for debug/ui.
 
@@ -124,10 +132,18 @@ class EvaluatedTarget(TargetBase):
 
     workspace: Workspace = None
 
+    # all inputs used (or to be used) for this target
     inputs: list[FileStatus] = None
 
+    # all outputs produced (or to be produced) for this target
     outputs: list[FileStatus] = None
 
+    output_dict: dict[Union[int, str, None], Union[FileStatus, list[FileStatus]]] = None
+
+    # TODO: inputs dictionary, "" or None is for unnamed inputs. used for evaluation of acions
+    inputs_dictionary: dict[Union[str, None], list[Path]] = None
+
+    # references to targets this target requires.
     requires: list["EvaluatedTarget"] = None
 
     actions: list[InternalAction] = None
@@ -141,20 +157,17 @@ class EvaluatedTarget(TargetBase):
 
     @property
     def makex_file_path(self) -> str:
+        # TODO: fix this.
         return str(self.location.path)
 
     def key(self):
-        #if self.path is None:
-        #    raise Exception(f"Evaluated path is wrong: {self!r} {self.path!r}")
-        return format_hash_key(self.name, self.location.path)
+        return format_hash_key(self.name, self.makex_file.path)
 
     def __eq__(self, other: "EvaluatedTarget"):
-        assert hasattr(other, "key")
-        assert callable(getattr(other, "key"))
-        return self.key() == other.key()
-
-        #return self.key() == other.key()
-        #return other.name == self.name and str(other.location.path) == str(self.location.path)
+        keyfunc = getattr(other, "key", None)
+        assert keyfunc is not None
+        assert callable(keyfunc)
+        return self.key() == keyfunc()
 
     def __hash__(self):
         return hash(self.key())
@@ -180,11 +193,8 @@ class EvaluatedTarget(TargetBase):
         ]
 
         if self.makex_file:
-            # Add the checksums of the makex file and any used environment variables.
-            data.append(f"makex-file:{self.makex_file.checksum}")
-
-            if self.makex_file.enviroment_hash:
-                data.append(f"environment:{self.makex_file.enviroment_hash}")
+            # Add the checksums of the makex file, included makex files and any used environment variables.
+            data.extend(self.makex_file.hash_components())
 
         if self.actions:
             for command in self.actions:
@@ -207,24 +217,30 @@ class EvaluatedTarget(TargetBase):
                         trace("Rehashing. Not in cache. %s", require.key())
 
                 if rehash:
-                    requirement_hash = require.hash(ctx, hash_function=hash_function)
+                    requirement_hash = require.hash(
+                        ctx,
+                        hash_function=hash_function,
+                        hash_cache=hash_cache,
+                    )
+                    # XXX: not sure about this. we should have a HashCache class which does this internally.
+                    hash_cache[require.key()] = require
 
                 data.append(f"require:{requirement_hash}")
 
         if self.inputs:
             # XXX: Inputs lists can be large (find()/glob()); optimize by using Hasher.update into one value.
-            h = Hasher()
+            _hasher = hasher()
             for input in self.inputs:
                 #data.append(f"input-file:{str(input.checksum)}")
-                h.update(f"input-file:{str(input.checksum)}")
-            data.append(h.hex_digest())
+                _hasher.update(f"input-file:{str(input.checksum)}")
+            data.append(f"input-files:{_hasher.hex_digest()}")
 
         trace("Target %s hash data: %s", self.key(), data)
         return hash_function("|".join(data))
 
 
 def target_hash(data: str):
-    return hashlib.shake_256(data.encode()).hexdigest(20)
+    return HASH_FUNCTION(data.encode()).hexdigest()
 
 
 def format_hash_key(name: str, path: str):
@@ -381,7 +397,7 @@ class EvaluatedTargetGraph:
         """
         yields the inputs of target and required targets.
 
-        yields target.require's inputs first, then yields target's inputs
+        yields target.require's inputs first, then yields those of target's dependendencies
 
         :param target:
         :param recursive:

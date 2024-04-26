@@ -2,7 +2,7 @@
 
 ## Rationale
 
-- Common target patterns should be sharable.
+- Common target/action patterns should be sharable.
 - Increase terseness.
 - Increase reusability. Reduce copy/paste.
 
@@ -12,19 +12,33 @@
 ```python
 
 
+@action()
+def example_action():
+    return [
+        shell(),
+        execute(),
+        ...
+    ]
+
+
 @macro()
 def example_macro(name:str, argument1:Path):
     target(
         name=f"example-{name}",
         requires=[
             argument1
-        ]
+        ],
+        steps=[
+            example_action()
+        ],
     )
 
 example_macro(
     name="test",
     argument1=source("path/to/file")
 )
+
+
 ```
 
 ## Implementation Details

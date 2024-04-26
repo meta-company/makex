@@ -12,12 +12,15 @@ from makex.context import Context
 from makex.executor import Executor
 from makex.makex_file import (
     InternalActionBase,
-    PathElement,
-    ResolvedTargetReference,
+    MakexFile,
     TargetObject,
-    TargetReferenceElement,
 )
 from makex.makex_file_parser import TargetGraph
+from makex.makex_file_types import (
+    PathElement,
+    ResolvedTargetReference,
+    TargetReferenceElement,
+)
 from makex.protocols import (
     CommandOutput,
     StringHashFunction,
@@ -65,10 +68,11 @@ def test_sort(tmp_path):
 
     l = fake_location(tmp_path / "Makexfile")
 
-    d = TargetObject("d", location=l)
-    b = TargetObject("b", requires=[d], location=l)
-    c = TargetObject("c", requires=[d], location=l)
-    a = TargetObject("a", requires=[b, c], location=l)
+    makex_file = MakexFile(None, tmp_path / "Makexfile")
+    d = TargetObject("d", makex_file=makex_file, location=l)
+    b = TargetObject("b", requires=[d], makex_file=makex_file, location=l)
+    c = TargetObject("c", requires=[d], makex_file=makex_file, location=l)
+    a = TargetObject("a", requires=[b, c], makex_file=makex_file, location=l)
     #errors = e.execute_targets(a)
 
     g = TargetGraph()
@@ -209,6 +213,8 @@ def test_input_ouput(tmp_path: Path):
     ipath = i_pathmaker.path
 
     debug("$SSSSS %s", opath())
+
+    makex_file = MakexFile(None, input_make_file)
     d = TargetObject(
         "d",
         path=opath(),
@@ -216,6 +222,7 @@ def test_input_ouput(tmp_path: Path):
         outputs=[opath("d")],
         run=[write("d")],
         location=location,
+        makex_file=makex_file,
     )
     b = TargetObject(
         "b",
@@ -224,6 +231,7 @@ def test_input_ouput(tmp_path: Path):
         outputs=[opath("b")],
         run=[write("b")],
         location=location,
+        makex_file=makex_file,
     )
     c = TargetObject(
         "c",
@@ -232,6 +240,7 @@ def test_input_ouput(tmp_path: Path):
         outputs=[opath("c")],
         run=[write("c")],
         location=location,
+        makex_file=makex_file,
     )
     a = TargetObject(
         "a",
@@ -240,6 +249,7 @@ def test_input_ouput(tmp_path: Path):
         outputs=[opath("d")],
         run=[write("a")],
         location=location,
+        makex_file=makex_file,
     )
 
     ctx = Context()

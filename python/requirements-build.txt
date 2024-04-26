@@ -1,5 +1,0 @@
-build
-shtab
-pex
-nuitka
-pytest

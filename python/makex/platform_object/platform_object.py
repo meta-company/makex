@@ -1,13 +1,12 @@
-import logging
 import operator
 from enum import Enum
+from logging import debug
 from typing import (
     Any,
+    Callable,
     Hashable,
     Union,
 )
-
-from logging import debug
 
 
 class PlatformTestObject:
@@ -39,7 +38,7 @@ def one_of(a, b):
     return operator.contains(b, a)
 
 
-op_map = {
+op_map: dict[Operator, Callable[[Any, Any], bool]] = {
     Operator.IN: one_of,
     Operator.LTE: operator.le,
     Operator.GT: operator.gt,
@@ -54,13 +53,13 @@ op_map = {
 
 
 class PlatformCondition:
-    left: "PlatformLeft"
+    left: Union["PlatformCondition", "PlatformLeft"]
     operator: Operator
     right: PlatformRight
 
     def __init__(
         self,
-        left: Union["PlatformLeft", "PlatformCondition"],
+        left: Union["PlatformCondition", "PlatformLeft"],
         operator: Operator,
         right: PlatformRight
     ):
@@ -69,36 +68,46 @@ class PlatformCondition:
         self.right = right
 
     def __repr__(self):
-        #def __str__(self):
         inside = " ".join((repr(self.left), str(self.operator), str(self.right)))
         return f"({inside})"
 
     def __hash__(self):
         return hash(self.left)
 
-    def __eq__(self, other: "PlatformLeft"):
-        d = {other.name: other.value}
+    def __eq__(self, other: Any):
+        name = getattr(other, "name", None)
+        if name is None:
+            return False
+
+        value = getattr(other, "value", None)
+
+        if value is None:
+            return False
+
+        d = {name: value}
         r = self.evaluate(d)
         debug("Evaluated %s: %s = %s", self, d, r)
-
         return r
 
     def returns(self, value):
-
         pass
 
-    def evaluate(self, platform: dict[Hashable, Any]):
+    def evaluate(self, platform: dict[Hashable, Any]) -> bool:
         if self.operator == Operator.AND:
-            left_value = self.left.evaluate(platform)
+            left_value = self.left.evaluate(platform) if isinstance(
+                self.left, PlatformCondition
+            ) else self.left.value
             right_value = self.right.evaluate(platform)
             return bool(left_value and right_value)
         elif self.operator == Operator.OR:
-            left_value = self.left.evaluate(platform)
+            left_value = self.left.evaluate(platform) if isinstance(
+                self.left, PlatformCondition
+            ) else self.left.value
             right_value = self.right.evaluate(platform)
             return bool(left_value or right_value)
 
         left_value = platform.get(self.left)
-        op = op_map.get(self.operator)
+        op = op_map[self.operator]
         return op(left_value, self.right)
 
     def __and__(self, other) -> "PlatformCondition":
@@ -193,7 +202,3 @@ class PlatformObject:
         self.os_type = PlatformLeft("os_type", values.get("os_type", None))
         self.architecture = PlatformLeft("architecture", values.get("architecture", None))
 
-    #    self.location = None
-
-    #def with_location(self, location:FileLocation) -> PlatformObject:
-    #    self.location = location

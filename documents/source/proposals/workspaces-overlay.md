@@ -4,7 +4,7 @@
 Coming soon. Not implemented yet. These feature is up for discussion.
 ```
 
-A Workspace may be named or overlayed on top of another Workspace (or all Workspaces).
+A Workspace may be named or overlaid on top of another Workspace (or all Workspaces).
 
 The names of these Workspaces may be defined in a Workspace file.
 TODO: Should they be in a Workspace file?

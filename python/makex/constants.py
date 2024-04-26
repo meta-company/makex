@@ -94,6 +94,7 @@ DEFAULT_IGNORE_NAMES = {
     '.venv',
 }
 
+# TODO: we may actually want to include pyc...
 DEFAULT_IGNORE_EXTENSIONS = {
     '.pyc',
 }
@@ -121,3 +122,15 @@ IGNORE_NONE_VALUES_IN_LISTS = True
 
 # Enable Slice with target(). target[:"name"] target["path":"name"]
 TARGET_GETITEM_ENABLED = False
+
+# Despite possible collisions/etc, sha1 is the fastest for hashing Targets
+# sha1 is at least 2x as fast as shake/md5
+HASHING_ALGORITHM = "sha1"
+
+
+# If True, the task hash will be stored in any declared output files (in an extended attribute).
+STORE_TASK_HASH_IN_OUTPUT_FILES = False
+
+
+# Included files will have all globals available to them (defined prior to the include() call)
+PASS_GLOBALS_TO_INCLUDE = False

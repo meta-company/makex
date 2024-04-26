@@ -11,7 +11,7 @@ target(
     requires=[
         join(self.name, ".c"),
     ],
-    runs=[
+    steps=[
         execute("clang", "-o", self.name, self.inputs),
     ]
 )
@@ -21,9 +21,12 @@ target(
 ## Considerations
 
 - `target`:
+  - overloaded
+
 - `self`:
-  - may confuse users. 
+  - may confuse existing python users. 
 
 ## Implementation Details
 
-The values from self properties can't be serialized to strings. We need to use a join() function and/or late evaluation.
+The values from self properties can't be immediately serialized to strings.
+We need to use a join() function and/or late evaluation.

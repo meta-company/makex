@@ -16,27 +16,36 @@ from typing import (
 BUILTIN_XATTR = True
 
 if BUILTIN_XATTR:
+    from os import (
+        getxattr,
+        removexattr,
+        setxattr,
+    )
 
     def get_xattr(path, attribute):
-        return os.getxattr(path, attribute)
+        return getxattr(path, attribute)
 
     def set_xattr(path, attribute, value):
-        return os.setxattr(path, attribute, value)
+        return setxattr(path, attribute, value)
 
     def remove_xattr(path, attribute):
-        return os.removexattr(path, attribute)
+        return removexattr(path, attribute)
 
 else:
-    import xattr
+    from xattr import (
+        getxattr,
+        removexattr,
+        setxattr,
+    )
 
     def get_xattr(path, attribute):
-        return xattr.getxattr(path, attribute)
+        return getxattr(path, attribute)
 
     def set_xattr(path, attribute, value):
-        return xattr.setxattr(path, attribute, value=value)
+        return setxattr(path, attribute, value=value)
 
     def remove_xattr(path, attribute):
-        return xattr.removexattr(path, attribute)
+        return removexattr(path, attribute)
 
 
 INODE_IN_FINGERPRINT = False
@@ -74,10 +83,6 @@ class FileChecksum:
 
     mtime
     size
-    inode number
-    file mode
-    owner uid and gid
-    (targets only) the sequence number of the last time it was built
 
     We use mtime because ctime is too sensitive/false positive.
 
@@ -102,6 +107,12 @@ class FileChecksum:
 
     def __hash__(self):
         return hash(f"{self.type.value}:{self.value}")
+
+    def write(self, path: Path):
+        type = self.type
+        csum = self.value
+        fingerprint = self.fingerprint
+        set_xattr(path, f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii"))
 
     @classmethod
     def parse(cls, string, fingerprint=None) -> "FileChecksum":
@@ -153,7 +164,12 @@ class FileChecksum:
             LOGGER.debug(f"Updating file mode {new_mode}: %s", path)
             os.chmod(path, new_mode)
 
-        set_xattr(path, f"user.checksum.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
+        try:
+            set_xattr(path, f"user.checksum.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
+        except OSError as e:
+            logging.error(e)
+            pass
+
         return cls(type, d, fingerprint)
 
     @classmethod
@@ -281,9 +297,7 @@ class FileChecksum:
                 if get_xattr(fname, TEST_KEY) == TEST_VALUE:
                     remove_xattr(fname, TEST_KEY)
                     result = True
-            except IOError as e:
-
-                logging.error("IOERROR {}")
+            except (OSError,IOError) as e:
                 logging.exception(e)
                 result = False
 
@@ -308,7 +322,7 @@ class FileChecksum:
         )
 
     @staticmethod
-    def fingerprint(path: Path, type: Type = Type.SHA256):
+    def get_fingerprint(path: Path, type: Type = Type.SHA256) -> Optional[str]:
         return get_fingerprint(path)
 
 

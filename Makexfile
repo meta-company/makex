@@ -3,20 +3,23 @@
 Note: This file must be run with the MAKEX_DEVELOPER environment variable to something True.
 
 """
-VENV = path("venv")
+
+VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions.
-VERSION = "20240301"
+VERSION = "20240401"
 
-target(
+PYPROJECT_TOML = source() / "python" / "pyproject.toml"
+
+task(
     name="hello-world",
-    runs=[
+    steps=[
         print("Hello World!"),
     ],
 )
 
-target(
+task(
     name="documents-html",
     requires=[
         ":venv",
@@ -27,10 +30,10 @@ target(
     outputs=[
         "html/index.html",
     ],
-    runs=[
+    steps=[
         # Set the environment for future runnables.
         environment(
-            BUILDDIR=path("documents-html"),
+            BUILDDIR=task_path("documents-html"),
             LC_ALL="C",
             RELEASE=VERSION,
         ),
@@ -46,16 +49,16 @@ target(
 )
 
 # stage a directory for a source package
-target(
+task(
     name="source-package",
     requires=[
         find("python", glob("**/*.py")),
         ":build-completions",
     ],
-    runs=[
+    steps=[
         copy("python", exclude=[glob("**requirements*.txt"), glob("**pyproject.toml")]),
-        copy("python/pyproject.toml"),
-        sync(["documents/Makefile"]), # "documents/source"
+        copy(PYPROJECT_TOML),
+        #mirror(["documents/Makefile"]), # "documents/source"
         copy("Makexfile"),
         copy("README.md"), #archive(f"makex-{VERSION}-source.zip"),
         copy(
@@ -67,13 +70,13 @@ target(
 )
 
 # Build and deploy the latest version
-target(
+task(
     name="pypi",
     requires=[
         ":source-package",
         ":venv",
     ],
-    runs=[
+    steps=[
         #shell(
         #    f"source {VENV}/bin/activate",
         #    f"python -m build {path('source-package')} --sdist --outdir {path('pypi')}",
@@ -85,14 +88,14 @@ target(
             VENV_BIN / "pyproject-build",
             "--sdist",
             "--outdir",
-            path('source-package'),
-            path('source-package')
+            task_path('source-package'),
+            task_path('source-package')
         ),
-        execute("metacompany-twine", path('pypi')),
+        execute("metacompany-twine", task_path('pypi')),
     ],
 )
 
-PEX_ROOT = path("install-pex")
+PEX_ROOT = task_path("install-pex")
 
 PEX_ARGS = []
 PEX_ARGS += [f"--pex-root", f"{PEX_ROOT}"]
@@ -100,19 +103,23 @@ PEX_ARGS += ["-P", "makex@python"]
 PEX_ARGS += ["-m", "makex"]
 PEX_ARGS += ["--sh-boot"]
 PEX_ARGS += ["--no-wheel", "--pip-version=latest"]
-PEX_ARGS += ["--requirement", "python/requirements.txt"]
+PEX_ARGS += ["--requirement", PEX_ROOT / "requirements.txt"]
 # XXX: this doesn't work for some reason
 #PEX_ARGS+= ["--interpreter-constraint", "CPython>=3.9"]
 
-target(
+task(
     name="install-pex",
     requires=[
-        ":venv",
+        #":venv",
+        Reference("venv"),
         ":source-package",
     ],
-    runs=[
+    steps=[
         shell(
             f"source {VENV}/bin/activate",
+        ),
+        execute(
+            "pip-requirements", "txt", "--required", PYPROJECT_TOML, PEX_ROOT / "requirements.txt"
         ),
         execute(
             VENV_BIN / "pex",
@@ -131,45 +138,51 @@ target(
 )
 
 # create a venv
-target(
+task(
     name="venv",
     requires=[
-        "python/requirements.txt",
-        "python/requirements-documents.txt",
-        "python/requirements-build.txt",
+        PYPROJECT_TOML,
     ],
     outputs=[
         VENV / "pyvenv.cfg",
     ],
-    runs=[
-        execute("python3.9", "-m", "venv", "--clear", VENV),
+    steps=[
+        execute("python", "-m", "venv", "--clear", VENV),
         execute(VENV_BIN / "pip", "install", "--upgrade", "pip"),
-        execute(VENV_BIN / "pip", "install", "-r", "python/requirements.txt"),
-        execute(VENV_BIN / "pip", "install", "-r", "python/requirements-documents.txt"),
-        execute(VENV_BIN / "pip", "install", "-r", "python/requirements-build.txt"),
+        execute(
+            "pip-requirements",
+            "install",
+            "--pip",
+            VENV_BIN / "pip",
+            "--all",
+            "python/pyproject.toml"
+        ),
     ],
 )
 
-target(
+task(
     name="mypy",
-    runs=[
+    steps=[
         ## || exit 0 because mypy returns a non-zero which causes makex to report errors
         shell(
             f"source {VENV}/bin/activate",
             "pip install mypy",
             # --cache-dir= because we don't want to pollute the source with .mypy_cache directories
             # mypy returns a non-zero exit code so we have to use || exit 0
-            f"mypy --cache-dir={path('mypy')} --follow-imports=silent --config-file python/mypy.ini --explicit-package-bases --show-absolute-path -p makex || exit 0",
+            f"mypy --cache-dir={task_path('mypy')} --follow-imports=silent --config-file python/mypy.ini --explicit-package-bases --show-absolute-path -p makex || exit 0",
         )
     ]
 )
 
-target(
+task(
     name="build-completions",
     requires=[
         ":venv",
+
+ # completions may change here:
+        "python/makex/__main__.py",
     ],
-    runs=[
+    steps=[
         shell(
             f"source {VENV}/bin/activate",
             # TODO: patch shtab to take preamble from file
@@ -183,18 +196,79 @@ target(
     # makex completions --print bash > ~/.local/share/bash-completion/completions/makex
 )
 
-target(
+task(
     name="test",
     requires=[":venv"],
-    runs=[
+    steps=[
         shell(
             f"source {VENV}/bin/activate",
-            f"pytest -o cache_dir={path('test')}/pytest python",
+            f"pytest -o cache_dir={task_path('test')}/pytest python",
         )
     ]
 )
 
-BUILD_NUITKA = path("nuitka")
+
+@macro
+def nuitka_target_command_line(
+    name,
+    PYTHON_PACKAGE,
+    APPLICATION_NAME,
+    pythonpath,
+    main,
+    requires=None,
+    VENV_BIN=None,
+    extra=None,
+):
+    """ Compile a command line application for nuitka. """
+    BUILD_NUITKA = task_path(name)
+
+    NUITKA_ARGS = []
+    NUITKA_ARGS += [f"--include-package={PYTHON_PACKAGE}"]
+    NUITKA_ARGS += [f"--report={BUILD_NUITKA}/nuitka-build-report.xml"]
+    NUITKA_ARGS += ["--follow-imports", "--disable-console"]
+    NUITKA_ARGS += [f"--output-dir={BUILD_NUITKA}"]
+    NUITKA_ARGS += [f"--output-filename={APPLICATION_NAME}"]
+    #NUITKA_ARGS += [f"--include-package-data={PYTHON_PACKAGE}.data.completions"]
+    NUITKA_ARGS += ["--python-flag=-O,nosite,no_docstrings"]
+    NUITKA_ARGS += ["--show-anti-bloat-changes"]
+    NUITKA_ARGS += ["--nofollow-import-to=*.tests"]
+    NUITKA_ARGS += ["--nofollow-import-to=*_test.py"]
+    #NUITKA_ARGS += ["--nofollow-import-to=shtab"]
+    NUITKA_ARGS += ["--nofollow-import-to=pytest"]
+    NUITKA_ARGS += ["--standalone", "--onefile"]
+    NUITKA_ARGS += ["--clang"]
+    NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
+    NUITKA_ARGS += ["--prefer-source-code"]
+    NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
+
+    task(
+        name=name,
+        requires=requires,
+        steps=[
+            environment(
+                PYTHONPATH=pythonpath,
+                CCFLAGS="-march=native -mtune=native -Os",
+            ),
+            execute(VENV_BIN / "nuitka3", NUITKA_ARGS, main)
+        ]
+    )
+
+
+nuitka_target_command_line(
+    name="nuitka2",
+    PYTHON_PACKAGE="makex",
+    APPLICATION_NAME="makex",
+    pythonpath=source("python"),
+    main=source("python/makex/__main__.py"),
+    requires=[":venv"],
+    VENV_BIN=VENV_BIN,
+    extra=[
+        f"--include-package-data=makex.data.completions",
+        "--nofollow-import-to=shtab",
+    ]
+)
+
+BUILD_NUITKA = task_path("nuitka")
 PYTHON_PACKAGE = "makex"
 APPLICATION_NAME = "makex"
 
@@ -216,22 +290,31 @@ NUITKA_ARGS += ["--clang"]
 NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
 NUITKA_ARGS += ["--prefer-source-code"]
 NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
-# --linux-icon=ICON_PATH
-# --company-name=COMPANY_NAME
-# --macos-app-version=MACOS_APP_VERSION
-# --macos-app-icon=ICON_PATH
-# --enable-console (win/mac)
-# --python-flag static_hashes (do not give Python run time warnings)
-target(
+
+task(
     name="nuitka",
     requires=[
         ":venv",
     ],
-    runs=[
+    steps=[
         environment(
             PYTHONPATH=source("python"),
             CCFLAGS="-march=native -mtune=native -Os",
         ),
         execute(VENV_BIN / "nuitka3", NUITKA_ARGS, source("python/makex/__main__.py"))
+    ]
+)
+
+task(
+    name="publish-documents",
+    requires=[":documents-html"],
+    steps=[
+        execute(
+            "metacompany-upload-documents",
+            "--latest",
+            "makex",
+            VERSION,
+            task_path("documents-html") / "html"
+        )
     ]
 )

@@ -2,11 +2,20 @@
 
 <!-- heading -->
 
-Makex is a new and simplified automation tool, similar to the original [Make](https://en.wikipedia.org/wiki/Make_(software)).
+Makex is a new and simplified build and automation tool, similar to the original [Make](https://en.wikipedia.org/wiki/Make_(software)).
 
 It __*makex*__ stuff happen. 🙂
 
 <!-- features -->
+
+
+## What Makex is used for
+
+- Compiling software/applications/firmware
+- Building filesystems/trees/file archives
+- Building and deploying websites and web applications
+- Running things in a repeatable manner
+- Replacing most or all of the other build systems
 
 ## Features
 
@@ -31,20 +40,20 @@ It __*makex*__ stuff happen. 🙂
 
 ## Quick Start
 
-- Install:
+1. Install:
 
   ```shell
   pip install makex
   ```
 
-- Define a Makex file (name it `Makexfile`):
+2. Define a Makex file (name it `Makexfile`):
 
   ```python
   #!makex
   
-  target(
+  task(
       name="hello-world",
-      runs=[
+      steps=[
           write("hello-world.txt", "Hello World!"),
   
           # or, you can use the shell, but it's not recommended:
@@ -56,13 +65,13 @@ It __*makex*__ stuff happen. 🙂
   )
   ```
 
-- Run makex and the target:
+3. Run makex and the target:
 
   ```shell
   makex run :hello-world
   ```
  
-- A file at `_output_/hello-world/hello-world.txt` will have the following contents:
+4. A file at `_output_/hello-world/hello-world.txt` will have the following contents:
 
   ```
   Hello World!

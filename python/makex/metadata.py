@@ -1,5 +1,11 @@
-from datetime import datetime, timezone
-from typing import Protocol, Optional
+from datetime import (
+    datetime,
+    timezone,
+)
+from typing import (
+    Optional,
+    Protocol,
+)
 
 from makex.context import Context
 from makex.protocols import StringHashFunction
@@ -82,6 +88,7 @@ class Dirtyness:
 #    column:int
 #    path:str
 
+
 class TargetMetadata:
     # TODO: we should be able to serialize Actions/arguments
     name: str
@@ -131,7 +138,13 @@ class TargetMetadata:
         return c
 
     @classmethod
-    def from_evaluated_target(cls, ctx:Context, target:EvaluatedTarget, hash_function:StringHashFunction, timing=None) -> "TargetMetadata":
+    def from_evaluated_target(
+        cls,
+        ctx: Context,
+        target: EvaluatedTarget,
+        hash_function: StringHashFunction,
+        timing=None
+    ) -> "TargetMetadata":
         c = cls()
         c.name = target.name
         c.path = target.path.as_posix()
@@ -201,9 +214,8 @@ class MetadataProtocol(Protocol):
     """
     Metadata [backend] protocol. This should be fast and synchronous.
     """
-    def get_target(self, target_hash:str)-> Optional[TargetMetadata]:
+    def get_target(self, target_hash: str) -> Optional[TargetMetadata]:
         pass
 
-    def put_target(self, target:TargetMetadata) -> Optional[Exception]:
+    def put_target(self, target: TargetMetadata) -> Optional[Exception]:
         pass
-
