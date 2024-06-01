@@ -176,7 +176,7 @@ class TargetGraph:
                     _path = Path(path)
                 else:
                     raise ExecutionError(
-                        f"Invalid target reference path: Type: {type(path)} {path}",
+                        f"Invalid task reference path: Type: {type(path)} {path}",
                         target,
                         getattr(path, "location", None)
                     )
@@ -189,7 +189,7 @@ class TargetGraph:
                     file = find_makex_files(_path, ctx.makex_file_names)
                     if file is None:
                         raise ExecutionError(
-                            f"No makex file found at {_path}. Invalid target reference.",
+                            f"No makex file found at {_path}. Invalid task reference.",
                             target,
                             path.location
                         )
@@ -338,8 +338,6 @@ class TargetGraph:
             zero_indegree = new_zero_indegree
 
 
-
-
 def parse_target_string_reference(
     ctx: Context,
     base,
@@ -484,7 +482,7 @@ def parse_makefile_into_graph(
                     trace("Resolved makex file from string %s: %s", path, makex_file)
                     if makex_file is None:
                         error = ExecutionError(
-                            f"No makex files found in path {search_path} {path!r} for the target's requirements."
+                            f"No makex files found in path {search_path} {path!r} for the task's requirements."
                             f" Tried: {ctx.makex_file_names!r} {target}",
                             target,
                             path.location
@@ -521,7 +519,7 @@ def parse_makefile_into_graph(
                     trace("Resolved makex file from pathelement %s: %s", path, makex_file)
                     if makex_file is None:
                         error = ExecutionError(
-                            f"No makex files found in path {search_path} for the target's requirements.",
+                            f"No makex files found in path {search_path} for the task's requirements.",
                             target,
                             path.location
                         )
@@ -562,14 +560,14 @@ def parse_makefile_into_graph(
 
         if _makefile.targets:
             trace(
-                "Adding %d targets from makefile: %s...",
+                "Adding %d tasks from makefile: %s...",
                 len(_makefile.targets),
                 _makefile.targets.keys(), #[:min(3, len(makefile.targets))]
             )
 
             # we're done. add the target references to the parsing input queue
             for target_name, target in _makefile.targets.items():
-                trace("Add target to graph %s %s ", target, target.key())
+                trace("Add task to graph %s %s ", target, target.key())
                 try:
                     graph.add_target(ctx, target)
                 except ExecutionError as e:
@@ -623,13 +621,12 @@ def parse_makefile_into_graph(
         if makefile_path in executing:
             executing.remove(makefile_path)
 
-
     def search_makex_file(
-            ctx: Context,
-            workspace: Workspace,
-            base: Path,
-            search_path: str,
-            search_parents=True,
+        ctx: Context,
+        workspace: Workspace,
+        base: Path,
+        search_path: str,
+        search_parents=True,
     ):
         if search_path.startswith("//"):
             full_path = workspace.path / search_path[2:]

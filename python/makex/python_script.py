@@ -11,20 +11,19 @@ import ast
 import logging
 import sys
 import traceback
-import types
 from abc import (
     ABC,
     abstractmethod,
 )
 from collections import deque
 from copy import copy
-from importlib.machinery import ModuleSpec
 from io import StringIO
 from os import PathLike
 from pathlib import Path
 from typing import (
     Any,
     BinaryIO,
+    Callable,
     Optional,
     Protocol,
     Union,
@@ -125,7 +124,7 @@ class ScriptEnvironment(Protocol):
         }
 
 
-Globals = dict[str, str]
+Globals = dict[str, Any]
 
 
 class BaseScriptEnvironment(ABC):
@@ -156,7 +155,6 @@ class PythonScriptError(Exception):
 
     def pretty(self):
         return pretty_exception(self.wraps, self.location)
-        #return pretty_exception(self, Path(self.location.path), color=color)
 
 
 class StopPythonScript(PythonScriptError):
@@ -192,7 +190,7 @@ def wrap_script_function(f):
     return wrapper
 
 
-# TODO: Track other primitive types: None/bool/list/dict/int/float
+# TODO: Track other primitive types: None/bool/dict/int/float
 class StringValue(str):
     """
         This is a special type.
@@ -223,36 +221,31 @@ class StringValue(str):
     # TODO: __add__ with a non-string should return an internal JoinedString
 
 
-class DisableImports(ast.NodeVisitor):
-    # TODO: disable imports
-
+class _DisableImports(ast.NodeVisitor):
+    """
+        Disables import statements in the two forms.
+    """
     def __init__(self, path: PathLike):
         self.path = path
 
     def visit_Import(self, node):
-        print(
-            f"""Line {node.lineno} imports modules {
-        ', '.join(alias.name for alias in node.names)
-        }"""
-        )
+        names = ', '.join(alias.name for alias in node.names)
+        print(f"""Line {node.lineno} imports modules {names}""")
         raise PythonScriptError(
             "Invalid syntax (Imports are not allowed):",
             FileLocation.from_ast_node(node, self.path)
         )
 
     def visit_ImportFrom(self, node):
-        print(
-            f"""Line {node.lineno} imports from module {node.module} the names {
-        ', '.join(alias.name for alias in node.names)
-        }"""
-        )
+        names = ', '.join(alias.name for alias in node.names)
+        logging.error(f"""Line {node.lineno} imports from module {node.module} the names {names}""")
         raise PythonScriptError(
             "Invalid syntax (Imports are not allowed):",
             FileLocation.from_ast_node(node, self.path)
         )
 
 
-def _create_file_location_call(path, line, column):
+def create_file_location_call(path, line, column):
     file_location_call = ast.Call(
         func=ast.Name(
             id=FILE_LOCATION_NAME,
@@ -270,6 +263,18 @@ def _create_file_location_call(path, line, column):
         col_offset=column,
     )
     return file_location_call
+
+
+def add_location_keyword_argument(node: ast.Call, path, line, column):
+    file_location = create_file_location_call(path, line, column)
+    node.keywords.append(
+        ast.keyword(
+            arg=FILE_LOCATION_ARGUMENT_NAME,
+            value=file_location,
+            lineno=line,
+            col_offset=column,
+        )
+    )
 
 
 class _DisableAssignments(ast.NodeVisitor):
@@ -348,7 +353,7 @@ class _TransformStringValues(ast.NodeTransformer):
             offset = node.col_offset
 
             #logging.debug("Got string cnst %s %s", node.value, node.lineno)
-            file_location = _create_file_location_call(self.path, line, offset)
+            file_location = create_file_location_call(self.path, line, offset)
 
             # TODO: separate the values into JoinedString class so we can evaluate later.
             strcall = ast.Call(
@@ -379,7 +384,7 @@ class _TransformStringValues(ast.NodeTransformer):
         line = node.lineno
         offset = node.col_offset
 
-        file_location = _create_file_location_call(self.path, line, offset)
+        file_location = create_file_location_call(self.path, line, offset)
 
         # TODO: separate the values into JoinedString class so we can evaluate later.
         strcall = ast.Call(
@@ -403,7 +408,7 @@ class _TransformStringValues(ast.NodeTransformer):
         line = node.lineno
         offset = node.col_offset
 
-        file_location = _create_file_location_call(self.path, line, offset)
+        file_location = create_file_location_call(self.path, line, offset)
         strcall = ast.Call(
             func=ast.Name(id=STRING_VALUE_NAME, ctx=ast.Load()),
             args=[ast.Str(node.s)],
@@ -441,7 +446,6 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
             attr_of = func.value
             if not (isinstance(attr_of, ast.Name) and isinstance(attr_of.ctx, ast.Load)):
                 # could/probably have a str.method e.g. "".join()
-
                 #for child in ast.iter_child_nodes(node):
                 #    self.generic_visit(child)
                 self.generic_visit(node)
@@ -462,7 +466,7 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
         self.generic_visit(node)
 
         #debug(f">Transform fileloction {node.func.id}")
-        file_location = _create_file_location_call(self.path, node.lineno, node.col_offset)
+        file_location = create_file_location_call(self.path, node.lineno, node.col_offset)
         node.keywords = node.keywords or []
         node.keywords.append(ast.keyword(arg=FILE_LOCATION_ARGUMENT_NAME, value=file_location))
 
@@ -502,10 +506,8 @@ class ListValue:
         if isinstance(other, list):
             self.appended_values.extendleft(other)
         #elif isinstance(other, GlobValue):
-        #
         #    for i in other:
         #        self.appended_values.insert(0, i)
-        #
         #    self.prepended_values.extend(other._pieces)
         #    self.appended_values.appendleft(other)
         #elif isinstance(other, StringValue):
@@ -571,7 +573,7 @@ class _TransformListValues(ast.NodeTransformer):
             col_offset=offset,
         )
 
-        file_location = _create_file_location_call(self.path, line, offset)
+        file_location = create_file_location_call(self.path, line, offset)
         _node.keywords.append(
             ast.keyword(
                 arg=FILE_LOCATION_ARGUMENT_NAME,
@@ -591,11 +593,21 @@ class _TransformListValues(ast.NodeTransformer):
     visit_ListComp = visit_List
 
 
+class Options:
+    pre_visitors: list
+    post_visitors: list
+
+    imports_enabled: bool
+    import_function: Callable
+    disable_assigment_names: set
+
+
 class PythonScriptFile:
     def __init__(
         self,
         path: PathLike,
-        globals: Globals = None,
+        globals: Optional[Globals] = None,
+        # TODO: split these into a options class
         importer=None,
         pre_visitors=None,
         extra_visitors=None,
@@ -610,10 +622,6 @@ class PythonScriptFile:
         self.enable_imports = enable_imports
         self.importer = importer or self._importer
 
-        # transform attribute calls to have line/column information
-        #self._all_globals = self._env.globals()
-        #self._all_globals.update(self.globals)
-
     def _ast_parse(self, f: BinaryIO):
         # XXX: must be binary due to the way hash_contents works
         buildfile_contents = f.read()
@@ -625,16 +633,9 @@ class PythonScriptFile:
     def set_disabled_assignment_names(self, names: set):
         self.disable_assignment_names = names
 
-    #def _get_env_attr(self, name):
-    #    if self._env.has_global(name):
-    #        return self._env.get_global(name)
-
-    #    try:
-    #        return self._all_globals.get(name)
-    #    except ValueError as e:
-    #        raise PythonScriptError(f"{name} not defined in global scope.")
-
     def parse(self, file: Union[BinaryIO]) -> ast.AST:
+        # TODO: use hasattr(file, "read") instead of isinstance
+
         # parse and process the ast.
         # TODO: prefix the modules to execute with the ast to include
         try:
@@ -653,8 +654,9 @@ class PythonScriptFile:
         ignore = {STRING_VALUE_NAME, FILE_LOCATION_NAME, LIST_VALUE_NAME, GLOBALS_NAME}
 
         # Catch some early errors
+        # TODO: enable this once we have options
         if False:
-            t = DisableImports(self.path)
+            t = _DisableImports(self.path)
             t.visit(tree)
 
         t = _DisableAssignments(self.path, self.disable_assignment_names)
@@ -683,53 +685,18 @@ class PythonScriptFile:
         raise ImportError("Imports are disabled here.")
 
     def execute(self, tree: ast.AST):
+        #print(ast.dump(tree, indent=2))
+
         if not isinstance(tree, ast.AST):
             raise ValueError(f"Expected AST argument. Got {type(tree)}")
-            # TODO: use hasattr(file, "read") instead of isinstance
-            #tree = file
-        #else:
-        #    tree = self.parse(file)
-        from importlib.abc import Loader
 
-        class CustomModule(types.ModuleType):
-            def __init__(self, name):
-                super().__init__(name)
-                self.macros = {}
-
-            def __getattribute__(self, item):
-                if item == "__dict__":
-                    return self.__dict__
-
-                macro = self.macros.get(item, None)
-
-                if macro is None:
-                    raise PythonScriptError(
-                        f"Can't import {item} from {self.name}", FileLocation(0, 0, "//")
-                    )
-                return macro
-
-        class MakexLoader(Loader):
-            def create_module(self, spec: ModuleSpec) -> Union[types.ModuleType, None]:
-                print("CREATING MODULE", spec)
-                module = types.ModuleType(spec.name)
-                #exec(code, module.__dict__)
-
-                return module
-
-            def exec_module(self, module: types.ModuleType) -> None:
-                print("Exec module", module)
-                pass
-
-        #scope = self._env.globals()
-        #scope.update(self.globals)
         scope = self.globals
-        #scope["__getattr__"] = self._get_env_attr
 
+        # TODO: make this line optional, default true
         scope["__builtins__"] = {}
 
         if self.enable_imports:
             scope["__builtins__"] = {"__import__": self.importer}
-        #print(ast.dump(tree, indent=2))
 
         scope[STRING_VALUE_NAME] = StringValue
         scope[FILE_LOCATION_NAME] = FileLocation

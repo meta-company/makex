@@ -258,6 +258,13 @@ class PathElement:
     def __repr__(self):
         return f'PathElement({self._as_path()})'
 
+    def with_suffix(self, suffix, **kwargs):
+        location = kwargs.pop("_location_")
+        _path = self._as_path()
+        _path = _path.with_suffix(suffix)
+        return PathElement(*_path.parts, base=self.base, location=location)
+
+
     def __str__(self):
         if self.resolved:
             return str(self.resolved)
@@ -385,8 +392,11 @@ class EnvironmentVariableProxy:
 
     def get(self, key, default=SENTINEL, _location_: FileLocation = None) -> StringValue:
         item = self.__env.get(key, default)
-        if item is None or item is SENTINEL:
+        if item is SENTINEL:
             raise PythonScriptError(f"Environment variable {key} not defined.", _location_)
+
+        if item in {None,False}:
+            return item
 
         self.__usages[key] = item
 

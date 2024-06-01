@@ -98,5 +98,5 @@ class MissingOutputFileError(MakexError):
 
 
 class MultipleErrors(MakexError):
-    def __init__(self, erorrs: list[Exception]):
-        pass
+    def __init__(self, errors: list[Exception]):
+        self.errors = errors

@@ -56,6 +56,9 @@
    proposals/workspaces-overlay
    comparison
    how-it-works
+   syntax-actions
+   syntax-includes
+   syntax-macros
    
 ```
 

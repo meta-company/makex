@@ -6,20 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "makex"
 dynamic = ["version"]
 description = "Build tool"
-readme = { file = "README.md", content-type="text/markdown" }
-license = { file = "LICENSE.md", content-type="text/markdown" }
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { file = "LICENSE.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
 dependencies = [
-    # XXX: We don't need this anymore but we can fall back if ours doesn't work.
-    #"reflink>=0.2.2",
-    # XXX: We don't need this anymore but we can fall back. This xattr package doesn't emit auditing events unlike the builtin.
-    #"xattr>=1.0.0",
+    # XXX: We may revert to this:
+    #"progressbar2>=4.3.2",
+    # TODO: remove this dependency.
     "toml>=0.10.2",
-    "progressbar2>=4.3.2",
 ]
 authors = [
-    {name = "Nate Skulic"},
-    {name = "MetaCompany" },
+    { name = "Nate Skulic" },
+    { name = "MetaCompany" },
 ]
 keywords = ["build", "make", "automation"]
 classifiers = [
@@ -28,7 +26,7 @@ classifiers = [
     #"License :: OSI Approved :: Apache Software License",
     "Operating System :: Unix",
     "Operating System :: POSIX :: Linux",
-   # "Operating System :: MacOS :: MacOS X",
+    # "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Software Development :: Build Tools",
@@ -40,6 +38,14 @@ classifiers = [
 version = { attr = "makex.version.VERSION" }
 
 [project.optional-dependencies]
+use-reflink = [
+    # XXX: We don't need this anymore but we can fall back if ours doesn't work.
+    #"reflink>=0.2.2",
+]
+use-xattr = [
+    # XXX: We don't need this anymore but we can fall back. This xattr package doesn't emit auditing events unlike the builtin.
+    #"xattr>=1.0.0",
+]
 build = [
     "build",
     "shtab",
@@ -59,6 +65,9 @@ documents = [
     "myst-parser",
     "markdown-it-py[linkify,plugins]"
 ]
+typechecking = [
+    "typing_extensions"
+]
 
 [project.scripts]
 makex = "makex.__main__:main"
@@ -69,7 +78,7 @@ where = ["python"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"makex.data.completions" =[
+"makex.data.completions" = [
     "*.bash",
     "*.zsh",
 ]

@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import (
     dataclass,
@@ -12,7 +13,6 @@ from typing import (
     Union,
 )
 
-import toml as toml
 from makex.constants import (
     CONFIG_NAME_1,
     CONFIG_NAME_2,
@@ -24,6 +24,18 @@ from makex.errors import (
     GenericSyntaxError,
     MakexError,
 )
+
+_HAS_TOML = False
+try:
+    import tomllib as toml
+    _HAS_TOML = True
+except ImportError:
+    try:
+        import toml as toml
+        _HAS_TOML = True
+    except ImportError:
+        _HAS_TOML = False
+
 
 
 class ConfigurationError(MakexError):
@@ -189,7 +201,6 @@ def evaluate_configuration_environment(
                 read, write = os.pipe()
                 os.write(write, script.encode("utf-8"))
                 os.close(write)
-                print(shell, script)
                 process = run(
                     shell,
                     env=current_enviroment,
@@ -254,6 +265,18 @@ def read_configuration(path: Path) -> Configuration:
             raise Exception(f"Error loading configuration file at {path}: {e} {type(e)}")
 
 
+def read_configuration_json(path: Path) -> Configuration:
+    with path.open("r") as f:
+        try:
+            d = json.load(f)
+            return Configuration.from_json(d)
+        except json.JSONDecodeError as e:
+            l = GenericFileLocation(path, e.lineno, e.colno)
+            raise GenericSyntaxError(e.msg, location=l, type="Configuration") from e
+        except Exception as e:
+            raise Exception(f"Error loading configuration file at {path}: {e} {type(e)}")
+
+
 def collect_configurations(
     cwd: Path, parents=True, verbose: Callable[[str], None] = lambda x: None
 ) -> ConfigurationFiles:
@@ -278,6 +301,20 @@ def collect_configurations(
 
             if workspace_file.exists():
                 workspace_files_found.append(workspace_file)
+
+            if False:
+                for config_file_type, config_file_name in CONFIG_FILE_NAMES:
+                    path = parent / config_file_name
+
+                    if path.exists() is False:
+                        continue
+
+                    if config_file_type == "toml":
+                        config_files_found.append(read_configuration(path))
+                    elif config_file_type == "json":
+                        config_files_found.append(read_configuration(path))
+                    else:
+                        raise NotImplementedError
 
             if config_file1.exists():
                 verbose(f"Reading configuration file at {config_file1}")

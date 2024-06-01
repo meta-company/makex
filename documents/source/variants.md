@@ -115,18 +115,50 @@ print(f"Python {variant('python-version').choices}")
 print(f"Python {variant('python-version').data.binary}")
 
 PYTHON = variant('python-version').get("binary")
+PYTHON = variant_data("python-version", "binary")
 
 task(
-
-    # pex varies on the python variant
+    # task varies on the python version
     #varies=["python"],
-    # pex varies on the python variants
+    # task varies on the python version
     variants=["python-version"],
     steps=[
         execute(PYTHON, "-V")
-        ]
+    ]
 )
 
 ```
 
+# UndeterminedVariantData(variant_name, data_name)
 
+If a variant doesn't have a default and isn't specified (e.g. when analyzing), the data will return
+`UndeterminedVariantData(variant_name, data_name)`.
+
+Undetermined data shall be iterable, returning a UndeterminedVariantDataList(variant_name, data_name). Iterating over/appending
+variant data in the top level of a Makex file should still work properly:
+
+```python
+
+variant(
+    name="example-variant",
+    choices={
+        "v1": ["-v1"],
+        "v2": ["-v2"],
+    }
+)
+
+ARGS = variant["example-arguments"]["v1"]
+ARGS += ["-example-argument"]
+
+task(
+    name="example-task",
+    steps=[
+        execute("executable", ARGS)
+    ]
+)
+```
+
+If the `example-variant` choice is not specified, `ARGS` shall be an UndeterminedVariantList with one value (`-example-argument`).
+The execute function should error because of this undetermined value.
+
+Upon execution of tasks, actions like `execute()` should respond early when one of their arguments is undetermined.

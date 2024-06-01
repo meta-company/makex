@@ -54,6 +54,8 @@ INODE_IN_FINGERPRINT = False
 TEST_KEY = b"user.test"
 TEST_VALUE = b"test"
 
+# hash will be stored in XATTR_PREFIX.algorithm
+XATTR_PREFIX="user.checksum"
 
 def get_digest_data(data: BinaryIO, hash_func=hashlib.sha256):
     h = hash_func()
@@ -165,7 +167,7 @@ class FileChecksum:
             os.chmod(path, new_mode)
 
         try:
-            set_xattr(path, f"user.checksum.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
+            set_xattr(path, f"{XATTR_PREFIX}.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
         except OSError as e:
             logging.error(e)
             pass
@@ -255,7 +257,7 @@ class FileChecksum:
             return False
 
         fingerprint = get_fingerprint(path)
-        set_xattr(path, f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii"))
+        set_xattr(path, f"{XATTR_PREFIX}.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii"))
         return True
 
     @classmethod
@@ -318,7 +320,7 @@ class FileChecksum:
             fingerprint = get_fingerprint(destination).encode("ascii")
 
         set_xattr(
-            destination, f"user.checksum.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii")
+            destination, f"{XATTR_PREFIX}.{type.value}", bytes(f"{csum}:{fingerprint}", "ascii")
         )
 
     @staticmethod
@@ -335,7 +337,7 @@ def copy_with_checksum(source, destination):
 def get_filechecksum_xattr(path: Path, type: FileChecksum.Type) -> tuple[str, str]:
     assert isinstance(type, FileChecksum.Type)
     try:
-        csum = get_xattr(path, f"user.checksum.{type.value}").decode("ascii")
+        csum = get_xattr(path, f"{XATTR_PREFIX}.{type.value}").decode("ascii")
         csum, csum_fingerprint = csum.split(":")
 
     except ValueError:
@@ -374,7 +376,7 @@ def get_attributes(
     csum_fingerpint = None
 
     try:
-        csum = get_xattr(path, f"user.checksum.{type.value}").decode("ascii")
+        csum = get_xattr(path, f"{XATTR_PREFIX}.{type.value}").decode("ascii")
         csum, csum_fingerpint = csum.split(":")#x.get(f"user.checksum.{type.value}.fingerprint").decode("ascii")
     except ValueError:
         return None, None, None
@@ -383,3 +385,4 @@ def get_attributes(
         pass
 
     return csum, csum_fingerpint, fingerprint
+

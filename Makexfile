@@ -4,11 +4,14 @@ Note: This file must be run with the MAKEX_DEVELOPER environment variable to som
 
 """
 
+# Python interpreter to use to create a virtual environment:
+PYTHON = "python3"
+
 VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions.
-VERSION = "20240401"
+VERSION = Environment.get("MAKEX_VERSION", "20240601")
 
 PYPROJECT_TOML = source() / "python" / "pyproject.toml"
 
@@ -41,6 +44,7 @@ task(
             f"source {VENV}/bin/activate",
             f"make -e -C documents clean html",
         ),
+        print(f"Documents available at {task_path('documents-html')}/html/index.html")
         # all three of these are the same:
         #shell(f"xdg-open $PWD/_output_/documents-html/html/index.html")
         #shell(f"xdg-open {path('documents-html')}/html/index.html")
@@ -91,7 +95,7 @@ task(
             task_path('source-package'),
             task_path('source-package')
         ),
-        execute("metacompany-twine", task_path('pypi')),
+        execute("metacompany-twine", task_path('source-package')),
     ],
 )
 
@@ -115,9 +119,6 @@ task(
         ":source-package",
     ],
     steps=[
-        shell(
-            f"source {VENV}/bin/activate",
-        ),
         execute(
             "pip-requirements", "txt", "--required", PYPROJECT_TOML, PEX_ROOT / "requirements.txt"
         ),
@@ -147,7 +148,7 @@ task(
         VENV / "pyvenv.cfg",
     ],
     steps=[
-        execute("python", "-m", "venv", "--clear", VENV),
+        execute(PYTHON, "-m", "venv", "--clear", VENV),
         execute(VENV_BIN / "pip", "install", "--upgrade", "pip"),
         execute(
             "pip-requirements",
@@ -240,6 +241,7 @@ def nuitka_target_command_line(
     NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
     NUITKA_ARGS += ["--prefer-source-code"]
     NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
+    NUITKA_ARGS += extra
 
     task(
         name=name,
@@ -316,5 +318,49 @@ task(
             VERSION,
             task_path("documents-html") / "html"
         )
+    ]
+)
+
+
+### Build RPM:
+
+# RPM Parameters
+# Release is typically unchanged
+# Set MAKEX_RPM_DIST to override the dist
+RPM_NAME = "makex"
+RPM_VERSION = VERSION
+RPM_RELEASE = "1"
+RPM_DIST = Environment.get("MAKEX_RPM_DIST", None)
+
+BUILD_ROOT = task_path("rpm")
+
+RPMBUILD_FLAGS = ["--define", f"_topdir {BUILD_ROOT}"]
+RPMBUILD_FLAGS += ["--define", f"_rpmdir {BUILD_ROOT}"]
+RPMBUILD_FLAGS += ["--define", "_srcrpmdir %{_rpmdir}"]
+RPMBUILD_FLAGS += ["--define", f"version {RPM_VERSION}"]
+RPMBUILD_FLAGS += ["--define", f"release {RPM_RELEASE}"]
+
+if RPM_DIST:
+    RPMBUILD_FLAGS += ["--define", f"dist {RPM_DIST}"]
+
+RPM_SOURCES_FOLDER = task_path("rpm") / "SOURCES"
+
+task(
+    name="rpm",
+    requires=[":source-package"],
+    steps=[
+        execute("mkdir", RPM_SOURCES_FOLDER),
+        copy("packaging/makex.sh", "SOURCES"),
+        shell(f"cd {task_path('source-package')} && zip -r {RPM_SOURCES_FOLDER}/makex-source.zip *"),
+
+        # TODO: use this instead
+        #archive(
+        #    path=task_path("rpm") / "SOURCES/makex-source.zip",
+        #    prefix=f"makex-{VERSION}",
+        #    files=[
+        #        "python"#
+        #    ]
+        #),
+        execute("rpmbuild", RPMBUILD_FLAGS, "-v", "-ba", "packaging/makex.spec"),
     ]
 )

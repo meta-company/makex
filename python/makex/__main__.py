@@ -51,6 +51,7 @@ from makex.errors import (
     Error,
     ExecutionError,
     GenericSyntaxError,
+    MultipleErrors,
 )
 from makex.executor import Executor
 from makex.flags import VARIANTS_ENABLED
@@ -574,9 +575,10 @@ def parse_scope(scope):
     return ParsedScope(path, type)
 
 
-def print_errors(ctx: Context, errors):
+def print_errors(ctx: Context, errors: Union[Exception, MultipleErrors]):
     if errors:
         print(f"{ctx.colors.ERROR+ctx.colors.BOLD}The execution had errors:{ctx.colors.RESET}\n")
+
     for error in errors:
         print("---------------")
         print_error(ctx, error)
@@ -587,6 +589,9 @@ def print_error(ctx: Context, error):
         print(pretty_makex_file_exception(error, error.location, colors=ctx.colors))
     elif isinstance(error, MakexFileCycleError):
         print(error.pretty(ctx))
+    elif isinstance(error, MultipleErrors):
+        for error in error.errors:
+            print_error(ctx, error)
     elif isinstance(error, ExecutionError):
         if error.location:
             print(pretty_makex_file_exception(error.error, error.location, colors=ctx.colors))
@@ -890,7 +895,7 @@ def main_get_path(args, extra):
     obj = get_build_path(
         objective_name=ref.name,
         variants=[],
-        input_directory=target_input,
+        input_directory=target_input.parent,
         build_root=ctx.cache,
         workspace=workspace.path,
         workspace_id=workspace.id,
@@ -1361,6 +1366,9 @@ def main_run(args, extra_args):
 
     try:
         executed, errors = executor.execute_targets(*targets_to_run)
+
+        if len(errors):
+            print_errors(ctx, errors)
     except KeyboardInterrupt as e:
         executor.stop.set()
         _kill_running_processes()
@@ -1376,9 +1384,6 @@ def main_run(args, extra_args):
         exc_info = sys.exc_info()
         traceback.print_exception(*exc_info)
         sys.exit(-1)
-
-    if len(errors):
-        print_errors(ctx, errors)
 
 
 COMMANDS = {

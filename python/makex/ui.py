@@ -5,7 +5,7 @@ import sys
 from io import StringIO
 from pathlib import Path
 
-import progressbar
+#import progressbar
 from makex.colors import (
     ColorsNames,
     NoColors,

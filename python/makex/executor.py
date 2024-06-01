@@ -45,6 +45,7 @@ from makex.makex_file import (
     resolve_string_path_workspace,
     resolve_target_output_path,
 )
+from makex.makex_file_parser import TargetGraph
 from makex.makex_file_types import (
     FindFiles,
     Glob,
@@ -81,7 +82,7 @@ class TargetResult:
         self.errors = errors or []
 
 
-_XATTR_OUTPUT_TARGET_HASH = b"user.makex.target_hash"
+_XATTR_OUTPUT_TARGET_HASH = b"user.makex.task_hash"
 
 from os import (
     getxattr,
@@ -177,14 +178,14 @@ class Executor:
 
     _executed_keys: set[str]
 
-    def __init__(self, ctx: "Context", workers=1, force=False):
+    def __init__(self, ctx: "Context", workers=1, force=False, graph=None):
         self.ctx = ctx
         self._workers = workers
         self.force = force
         self.analysis_mode = False
 
         # our input
-        self._graph_1 = ctx.graph
+        self._graph_1 = graph or ctx.graph or TargetGraph()
 
         self.stop = threading.Event()
 
@@ -219,7 +220,7 @@ class Executor:
 
         if True:
             requires = list(requires)
-            debug("Check target requires ready: %s", requires)
+            debug("Check task requires ready: %s", requires)
 
         statuses = []
         for target in requires:
@@ -254,7 +255,7 @@ class Executor:
         if DATABASE_ENABLED:
             key = target.key()
             hash = self._get_target_hash(target)
-            trace("Storing target in database %s (%s)", key, hash)
+            trace("Storing task in database %s (%s)", key, hash)
             self._disk_metadata.put_target(key, hash)
 
     def execute_targets(self, *targets: TargetObject) -> ExecuteResult:
@@ -317,7 +318,7 @@ class Executor:
             while self.stop.is_set() is False:
                 # loop until we wait on nothing
                 if len(self.waiting) == 0:
-                    debug("No more targets waiting for processing.")
+                    debug("No more tasks waiting for processing.")
                     self.stop.set()
                     continue
 
@@ -345,7 +346,7 @@ class Executor:
                         #raise Exception(f"Could not find target {target.name} in file {target.path}: {target.location}")
                         self.errors.append(
                             ExecutionError(
-                                f"Could not find target {target.name} in file {target.path}",
+                                f"Could not find task {target.name} in file {target.path}",
                                 target,
                                 target.location
                             )
@@ -408,7 +409,7 @@ class Executor:
             # we need to store the checksum in a database sidecar
             # store the checksum in the database
             if DATABASE_ENABLED is False:
-                raise NotImplementedError("No where to store file checksum.")
+                raise NotImplementedError("Nowhere to store file checksum.")
 
             fingerprint = FileChecksum.get_fingerprint(path)
 
@@ -439,7 +440,7 @@ class Executor:
         if self._supports_extended_attribute is False:
             # XXX: FS doesn't support xattr. Use the database to store/retrieve checksums.
             if DATABASE_ENABLED is False:
-                raise NotImplementedError("No where to check file checksum validity.")
+                raise NotImplementedError("Nowhere to check file checksum validity.")
 
             fingerprint = FileChecksum.get_fingerprint(path)
             string_path = str(path)
@@ -556,7 +557,7 @@ class Executor:
                 )
 
                 if not path.exists():
-                    error = ExecutionError("Missing input file: {node}", target, node.location)
+                    error = ExecutionError(f"Missing input file: {path}", target, node.location)
                     errors.append(error)
 
                     inputs.append(FileStatus(path=path, error=error))
@@ -640,7 +641,7 @@ class Executor:
 
                     if makex_file is None:
                         error = ExecutionError(
-                            f"No makex files found in path {_path} for the target's requirements.",
+                            f"No makex files found in path {_path} for the task's requirements.",
                             target,
                             path.location
                         )
@@ -661,7 +662,7 @@ class Executor:
 
                     if makex_file is None:
                         error = ExecutionError(
-                            f"No makex files found in path {_path} for the target's requirements.",
+                            f"No makex files found in path {_path} for the task's requirements.",
                             target,
                             path.location
                         )
@@ -671,7 +672,7 @@ class Executor:
                     ref = ResolvedTargetReference(name, makex_file, location=path.location)
                 else:
                     raise NotImplementedError(
-                        f"Invalid path in Target Reference. Got {type(path)}: {path}: node={node}"
+                        f"Invalid path in Task Reference. Got {type(path)}: {path}: node={node}"
                     )
 
                 requirement = self.graph_2.get_target(ref)
@@ -683,7 +684,7 @@ class Executor:
                 requires.append(requirement)
             else:
                 raise ExecutionError(
-                    f"Invalid requirement in target {target.key()} {type(node)}",
+                    f"Invalid requirement in task {target.key()} {type(node)}",
                     target,
                     target.location
                 )
@@ -706,7 +707,7 @@ class Executor:
                 if isinstance(path_like, list):
                     for value in path_like:
                         path = _transform_output_to_path(ctx, target, target_output_path, value)
-                        trace("Check target output: %s", path)
+                        trace("Check task output: %s", path)
                         status = self._get_output_file_status(path)
                         if k is None:
                             unnamed_outputs.append(status)
@@ -716,7 +717,7 @@ class Executor:
                         outputs.append(status)
                 else:
                     path = _transform_output_to_path(ctx, target, target_output_path, path_like)
-                    trace("Check target output: %s", path)
+                    trace("Check task output: %s", path)
                     status = self._get_output_file_status(path)
                     if k is None:
                         unnamed_outputs.append(status)
@@ -764,7 +765,7 @@ class Executor:
         if target.commands is not None and isinstance(target.commands, ListTypes) is False:
             location = figure_out_location(target.commands, target.location)
             err = PythonScriptError(
-                f"Target actions argument must be a list. Got {target.commands!r}", location
+                f"Task actions argument must be a list. Got {target.commands!r}", location
             )
             raise err
 
@@ -776,18 +777,21 @@ class Executor:
                         location = figure_out_location(c, target.location)
 
                         err = PythonScriptError(
-                            f"Invalid action in target {target}: {c!r}",
+                            f"Invalid action in task {target}: {c!r}",
                             location,
                         )
                         raise err
                     else:
                         arguments = c.transform_arguments(ctx, evaluated)
                         actions.append(InternalAction(c, arguments))
+            elif command is None:
+                # XXX: skip None values in steps/actions lists.
+                continue
             elif isinstance(command, InternalActionBase) is False:
                 location = figure_out_location(command, target.location)
 
                 err = PythonScriptError(
-                    f"Invalid action in target {target}: {command!r}",
+                    f"Invalid action in task {target}: {command!r}",
                     location,
                 )
                 raise err
@@ -809,12 +813,12 @@ class Executor:
         h = h or self._get_target_hash(evaluated)
         target_key = evaluated.key()
 
-        trace(f"Target hash is: %s of %r (exists=%s)", h, target_key, h in self._target_hash)
+        trace(f"Task hash is: %s of %r (exists=%s)", h, target_key, h in self._target_hash)
 
         if target_key in self._executed_keys:
             # we just executed this target, report it as dirty.
             # TODO: determine if this is correct.
-            trace(f"Target is dirty because it was just executed in this process. (%s)", target_key)
+            trace(f"Task is dirty because it was just executed in this process. (%s)", target_key)
             return True, []
 
         # TODO: we need to cache dirty checking so this doesn't go too deep.
@@ -826,12 +830,12 @@ class Executor:
 
         # XXX: Targets without any outputs are always dirty. We can't compare the outputs.
         if len(evaluated.outputs) == 0:
-            trace(f"Target is dirty because it has no declared outputs. (%s)", target_key)
+            trace(f"Task is dirty because it has no declared outputs. (%s)", target_key)
             return True, []
 
         # XXX: Targets with outputs, but without any input files or requirements are always dirty.
         if len(evaluated.inputs) == 0 and len(evaluated.requires) == 0:
-            trace(f"Target is dirty because it has no requirements or inputs. (%s)", target_key)
+            trace(f"Task is dirty because it has no requirements or inputs. (%s)", target_key)
             return True, []
 
         # First, Check the in-memory cache
@@ -848,23 +852,21 @@ class Executor:
                 # We need to verify the outputs here because it's possible they are missing/screwed up, and we were not the ones who produced the target.
                 if db_has_target is True:
                     debug(
-                        f"Target in database. Checking outputs... (%r, hash=%r).",
-                        evaluated.key(),
-                        h
+                        f"Task in database. Checking outputs... (%r, hash=%r).", evaluated.key(), h
                     )
 
                     if self._check_outputs_stale_or_missing(evaluated, h):
                         # db has a target produced with the specified hash. outputs are still valid.
-                        debug(f"Target is dirty because the outputs are stale (%r).", target_key)
+                        debug(f"Task is dirty because the outputs are stale (%r).", target_key)
                         target_dirty = True
                     else:
-                        debug(f"Outputs of target are not stale (%r, hash=%r).", target_key, h)
+                        debug(f"Outputs of task are not stale (%r, hash=%r).", target_key, h)
                         target_dirty = False
 
                     _outputs_checked = True
                 else:
                     debug(
-                        f"Target is dirty because the database doesn't have the target (%r, hash=%r).",
+                        f"Task is dirty because the database doesn't have the target (%r, hash=%r).",
                         target_key,
                         h
                     )
@@ -880,7 +882,7 @@ class Executor:
         else:
             # neither have the target
             debug(
-                "Target is dirty because hash isn't in memory or database: (%r, hash=%r)",
+                "Task is dirty because hash isn't in memory or database: (%r, hash=%r)",
                 target_key,
                 h,
             )
@@ -968,13 +970,13 @@ class Executor:
         else:
             delete_output = True
 
-        debug(f"Begin evaluate target {target}...")
+        debug(f"Begin evaluate task {target}...")
         # queue the requirements for execution if all dependencies are completed
         try:
             evaluated, errors = self._evaluate_target(target)
 
             if errors:
-                raise MultipleErrors(errors)
+                return None, [MultipleErrors(errors)]
         except (PythonScriptError, ExecutionError) as e:
             #logging.exception(e)
             #self.errors.append(e)
@@ -1041,7 +1043,7 @@ class Executor:
         """
 
         #self.ctx.ui.print(f"Evaluated target: {target.key()}")
-        debug("Evaluated target: %s", evaluated.key())
+        debug("Evaluated task: %s", evaluated.key())
 
         self.graph_2.add_target(evaluated)
 
@@ -1068,10 +1070,10 @@ class Executor:
         if target_dirty is False:
             self._mark_target_complete(evaluated)
             #self._queue_for_database(evaluated)
-            debug("Skipping target. Not dirty: %s", evaluated.key())
+            debug("Skipping task. Not dirty: %s", evaluated.key())
             return evaluated, None
 
-        info("Target has been deemed dirty. Queueing for execution: %s", evaluated.key())
+        info("Task has been deemed dirty. Queueing for execution: %s", evaluated.key())
         self._queue_target_on_pool(evaluated, delete_output, hash)
         return evaluated, None
 
@@ -1089,7 +1091,7 @@ class Executor:
         if cache_exists:
             if REMOVE_CACHE_DIRTY_TARGETS_ENABLED and delete_output:
                 debug(
-                    "Removing cache of %s (%s) because target is dirty.",
+                    "Removing cache of %s (%s) because task is dirty.",
                     evaluated.key(),
                     evaluated.cache_path
                 )
@@ -1104,7 +1106,7 @@ class Executor:
             logging.debug("Creating output directory %s", evaluated.cache_path)
             evaluated.cache_path.mkdir(parents=True, exist_ok=True)
 
-        debug("Output2 %s", list(evaluated.input_path.iterdir()))
+        #debug("Output2 %s", list(evaluated.input_path.iterdir()))
         # autogenerated path
         if SYMLINK_PER_TARGET_ENABLED is False:
             # create link Target.input_path / _output_ -> Target.cache_path.parent (_output_)
@@ -1127,7 +1129,7 @@ class Executor:
     def _check_output_hash_valid(self, path: Path, hash: str):
         # check the hash stored in the output file matches our target
         if hash != _get_xattr(path, _XATTR_OUTPUT_TARGET_HASH).decode("ascii"):
-            trace("Target.hash != output.hash: %s %s", path, hash)
+            trace("Task.hash != output.hash: %s %s", path, hash)
             return False
 
         return True
@@ -1176,7 +1178,7 @@ class Executor:
             if not path.exists():
                 errors.append(
                     ExecutionError(
-                        f"Target failed to create output file. Missing file at: {path}",
+                        f"Task failed to create output file. Missing file at: {path}",
                         target,
                         target.location
                     )
@@ -1192,7 +1194,7 @@ class Executor:
         return hash
 
     def _put_target_hash(self, target: EvaluatedTarget, hash):
-        trace("Store target hash %s %s", target.key(), hash)
+        trace("Store task hash %s %s", target.key(), hash)
         self._target_hash[target.key()] = hash
 
     def _target_completed(self, target: EvaluatedTarget, result: Future[TargetResult]):
@@ -1202,7 +1204,7 @@ class Executor:
 
         self._mark_target_executed(target)
 
-        debug("Target complete %s", target)
+        debug("Task complete %s", target)
 
         # store the hash in the cache for later.
         h = self._get_target_hash(target)
@@ -1243,7 +1245,7 @@ class Executor:
 
         while self._database_queue:
             target = self._database_queue.popleft()
-            trace("Writing queue target %r to database", target.key())
+            trace("Writing queued task %r to database", target.key())
             self._store_database(target)
 
     def _write_target_hash_to_outputs(self, target_hash: bytes, outputs: list[FileStatus]):
@@ -1253,9 +1255,9 @@ class Executor:
 
     def _execute_target_thread(self, ctx: Context, target: EvaluatedTarget, target_hash):
         # this is run in a separate thread...
-        debug(f"Begin execution of target: {target} [thread={threading.current_thread().ident}]")
+        debug(f"Begin execution of task: {target} [thread={threading.current_thread().ident}]")
 
-        ctx.ui.print(f"Execute target: {target.key()}")
+        ctx.ui.print(f"Execute task: {target.key()}")
         output = StringIO()
 
         # create a copy of the ctx.environment, so we can set ctx.environment variables throughout the process.
@@ -1281,7 +1283,7 @@ class Executor:
                 if execution.status != 0: #not in {0, CORRECTED_RETURN_CODE}:
                     # \n\n {execution.output} \n\n {execution.error}
                     string = [
-                        f"Error running the action for target ",
+                        f"Error running the action for task ",
                         f"{brief_target_name(context, target, color=True)}:{target.location.line} (exit={execution.status}) \n",
                         f"\tThe process had an error and returned non-zero status code ({execution.status}). See above for any error output."
                     ]
@@ -1297,7 +1299,7 @@ class Executor:
                 #    logging.exception(e)
                 #   pass
 
-        debug(f"Finished execution of target: {target}")
+        debug(f"Finished execution of task: {target}")
 
         if STORE_TASK_HASH_IN_OUTPUT_FILES:
             self._write_target_hash_to_outputs(target_hash, target.outputs)

@@ -1,4 +1,15 @@
 
+## 20240601
+
+- Fix/improve copy() action.
+- Improve source() function. Accept `Path` objects in arguments.
+- Add Path.with_suffix() function
+- Make assorted minor improvements
+- Fix `path` command output
+- Remove depedency on progressbar
+- Fix environment variable getter
+- Add experiment archive() action.
+
 ## 20240401
 
 - Sorry for the renames. Naming things is hard.

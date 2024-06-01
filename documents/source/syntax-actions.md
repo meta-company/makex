@@ -1,5 +1,4 @@
 
-(actions)=
 # Actions
 
 Each task can accept a list of "Actions" that will be run when the task is executed.

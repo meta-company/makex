@@ -21,6 +21,17 @@ def _get_bool(name, default: bool = _SENTINEL, prefix="MAKEX_", environ=environ)
         return False
 
 
+
+def _get_string(name, default: bool = _SENTINEL, prefix="MAKEX_", environ=environ) -> bool:
+    v = environ.get(f"{prefix}{name}", None)
+    if v is None:
+        if default is not _SENTINEL:
+            return default
+        return None
+
+    return name
+
+
 # Enable/disable all features in development, which may not be documented.
 DEVELOPMENT_ENABLED = _get_bool("DEVELOPER", False)
 
@@ -86,6 +97,11 @@ INCLUDE_ENABLED = _get_bool("INCLUDE_ENABLED", True)
 INCLUDE_MULTIPLE_LEVEL_ENABLED = False
 
 IMPORT_ENABLED = _get_bool("IMPORT_ENABLED", False)
+
+
+# Allow explicitly specifying the configuration file name. This will skip use of
+# the builtin file names.
+CONFIGURATION_FILE_NAME = _get_string("CONFIGURATION_FILE_NAME", None)
 
 # Strict mode
 # - Disable the shell (unless really explicit)

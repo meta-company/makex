@@ -34,6 +34,17 @@ class PathMaker:
     def __init__(self, root=None):
         self.root = root or Path.cwd()
 
+    def __truediv__(self, other):
+        path = Path(other)
+        parent = self.root
+
+        if not path.is_absolute():
+            path = parent / path
+        else:
+            path = path
+
+        return PathElement(*path.parts, resolved=path)
+
     def path(self, *args):
         path = Path(*args)
         #if not args:
@@ -48,6 +59,7 @@ class PathMaker:
 
         return PathElement(*path.parts, resolved=path)
 
+    __call__ = path
 
 def test_sort(tmp_path):
     """
@@ -94,8 +106,7 @@ def test1(tmp_path):
 
     """
 
-    pathmaker = PathMaker()
-    path = pathmaker.path
+    path = PathMaker(tmp_path)
 
     l = fake_location(tmp_path / "Makefilex")
 
@@ -206,11 +217,9 @@ def test_input_ouput(tmp_path: Path):
 
     location = fake_location(input_make_file)
 
-    o_pathmaker = PathMaker(output)
-    opath = o_pathmaker.path
+    opath = PathMaker(output)
 
-    i_pathmaker = PathMaker(input)
-    ipath = i_pathmaker.path
+    ipath = PathMaker(input)
 
     debug("$SSSSS %s", opath())
 

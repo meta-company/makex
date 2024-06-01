@@ -14,6 +14,10 @@ The Makex executable will be installed to `~/.local/bin/makex`.
 
 Make sure `~/.local/bin` is on your `PATH`.
 
+```{note}
+Makex will also install itself as `mx`.
+```
+
 <!--
 ## Using pipx
 

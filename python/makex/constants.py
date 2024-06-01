@@ -13,6 +13,13 @@ CONFIG_NAME_1 = "makex.toml"
 # lower priority/hidden config file name
 CONFIG_NAME_2 = ".makex.toml"
 
+CONFIG_FILE_NAMES = [
+    ("toml","makex.toml"),
+    ("toml",".makex.toml"),
+    ("json","makex.json"),
+    ("json",".makex.json"),
+]
+
 WORKSPACE_FILE_NAME = "WORKSPACE"
 
 MAKEX_FILE_NAMES = {"Makexfile", "makexfile"} #"Build",

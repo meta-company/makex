@@ -2,14 +2,14 @@
 
 Workspaces define the roots or boundaries of projects or a repository.
 
-Workspaces use the special `//` prefix marker in paths to easily refer to tasks consistently without 
+Workspaces use the special `//` prefix marker in paths to easily refer to tasks consistently in a workspace without 
 having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
 
 Tasks can not reach out of their Workspace for dependencies (for example, using `//..`). 
 For that matter, the double dot operator is disabled entirely in Makex Paths.
 
 Usage of Workspaces is not required. 
-If the Workspace is not defined, the root of the filesystem in the current working directory will be used as the path of the Workspace.
+If the Workspace is not defined, the root of the filesystem of the current working directory will be used as the Workspace.
 
 Defining a Workspace is highly recommended.
 
@@ -23,8 +23,8 @@ the {option}`workspace <makex --workspace>` command line argument
 
 ## Workspace File
 
-Aside from setting the {envvar}`WORKSPACE<WORKSPACE>` environment variable, one may create `WORKSPACE` files at the root of a Workspace.
-This will let makex know the directory with the `WORKSPACE` file is the root of the Workspace.
+Aside from setting the {envvar}`WORKSPACE<WORKSPACE>` environment variable, one may create a `WORKSPACE` file at the root of a Workspace.
+This will let Makex know the directory with the `WORKSPACE` file is the root of the Workspace.
 
 This is simply an empty file (at the moment), though it may be expanded with other functionality. 
 

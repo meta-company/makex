@@ -1,3 +1,5 @@
+import re
+
 from makex.patterns import (
     combine_patterns,
     make_glob_pattern,
@@ -22,3 +24,13 @@ def test():
     assert pattern.match("test/test.py")
     assert pattern.match("/test/test.py")
     assert pattern.match("test.py")
+
+
+def test_recursive():
+    pattern = re.compile(make_glob_pattern("**.py"))
+    assert pattern.match("/test/test.py")
+    assert pattern.match("test.py")
+
+    pattern = re.compile(make_glob_pattern("*.py"))
+    assert pattern.match("test.py")
+    assert not pattern.match("/test/test.py")

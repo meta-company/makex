@@ -1,6 +1,6 @@
 
 
-## Example
+# Example
 
 A contrived example of a makex file:
 

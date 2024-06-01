@@ -17,7 +17,7 @@ It __*makex*__ stuff happen. 🙂
 - Running things in a repeatable manner
 - Replacing most or all of the other build systems
 
-## Features
+## Features 🍩
 
 - Familiar Syntax
 - File Hashing and Checksums
@@ -28,11 +28,11 @@ It __*makex*__ stuff happen. 🙂
 
 <!-- links -->
 
-## Links
+## Links 🔗
 
 - [Documentation](https://meta.company/go/makex)
-- [Installation Instructions](https://meta.company/go/makex/install)
-- [Troubleshooting](https://meta.company/go/makex/trouble)
+- [Installation Instructions](https://documents.meta.company/makex/latest/install)
+- [Troubleshooting](https://documents.meta.company/makex/latest/trouble)
 - Support: [Google Groups](http://groups.google.com/group/makex) or [makex@googlegroups.com](mailto://makex@googlegroups.com)
 
 <!-- quick-start -->
@@ -48,9 +48,7 @@ It __*makex*__ stuff happen. 🙂
 
 2. Define a Makex file (name it `Makexfile`):
 
-  ```python
-  #!makex
-  
+  ```python 
   task(
       name="hello-world",
       steps=[
@@ -71,12 +69,15 @@ It __*makex*__ stuff happen. 🙂
   makex run :hello-world
   ```
  
+```{todo}
+Use the path command to show getting an output path.
+```
+
 4. A file at `_output_/hello-world/hello-world.txt` will have the following contents:
 
   ```
   Hello World!
   ```
-
 
 ## Limitations
 
@@ -87,7 +88,7 @@ It __*makex*__ stuff happen. 🙂
 This is an early release of Makex. Things may change. If you have any problems, feel free to contact us. 
 ```
 
-## Pronunciation
+## Pronunciation 🗣
 
-Makex is pronounced "makes", ˈmeɪks, ˈmeɪkˈɛks (or just "make" 🙂).
+Makex is pronounced "makes", ˈmeɪks, ˈmeɪkˈɛks (or just "make" 🙂)
 
