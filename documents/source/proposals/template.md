@@ -1,10 +1,12 @@
 ---
-author:  # List of author names/emails
+# List of author names/emails
+author:  
 - name: 
   email: 
-date: <yyyy-mm-dd> # date of creation
-status: <REQUIRED: Draft | Active | Accepted | Provisional | Deferred | Rejected | Withdrawn | Final | Superseded>
-version: <version>
+# date of creation
+date: "<yyyy-mm-dd>"
+status: "<REQUIRED: Draft | Active | Accepted | Provisional | Deferred | Rejected | Withdrawn | Final | Superseded>"
+version: "<version>"
 orphan: true
 ---
 

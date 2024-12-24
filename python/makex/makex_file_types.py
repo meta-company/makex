@@ -1,9 +1,11 @@
 import os
 from dataclasses import dataclass
+from enum import IntEnum
 from os import PathLike
 from pathlib import Path
 from typing import (
     Optional,
+    Protocol,
     Union,
 )
 
@@ -21,11 +23,33 @@ ListTypes = (list, ListValue)
 
 # TODO: handle bytes
 
-PathLikeTypes = Union[StringValue, "PathElement", "PathObject"]
+PathLikeTypes = Union[StringValue, "PathElement", "TaskPath"]
 MultiplePathLike = Union["Glob", "FindFiles"]
 AllPathLike = Union["Glob", "FindFiles", StringValue, "PathElement"]
 
 SENTINEL = object()
+
+
+# TODO: use an enum+protocol to distinguish most makex file types so we don't need to do isinstance everywhere (and we can use dicts for perf/matching).
+class MakexElement(IntEnum):
+    STRING = 1
+    INTEGER = 2
+    BOOLEAN = 3
+    LIST = 4
+    DICT = 5
+    REGULAR_EXPRESSION = 6
+    GLOB = 7
+    TASK_PATH = 8
+    PATH_ELEMENT = 9
+    FIND_FILES = 10
+    RESOLVED_TASK = 11
+    TASK_SELF = 12
+
+
+class MakexElementTypeProtocol(Protocol):
+    # Types should implement this for fast
+    def get_makex_file_type(self) -> MakexElement:
+        pass
 
 
 class VariableValue:
@@ -66,6 +90,9 @@ class Glob:
 
     def __str__(self):
         return self.pattern
+
+    def __repr__(self):
+        return f'''Glob("{self.pattern}")'''
 
 
 @dataclass()
@@ -115,18 +142,20 @@ class Expansion:
         return f"Expansion({self.string!r})"
 
 
-class PathObject:
+class TaskPath:
     """
-    The [output] path() object in makex files.
+    The [output] path object in makex files. Created by the makex task_path() function and others.
 
     TODO: Rename to TaskPath.
     TODO: use str instead of path for late evaluation.
 
     """
+    __slots__ = ["path", "location", "reference"]
+
     def __init__(
         self,
         path: Path,
-        reference: Optional["TargetReferenceElement"] = None,
+        reference: Optional["TaskReferenceElement"] = None,
         location: FileLocation = None
     ):
         self.path: Path = path
@@ -137,32 +166,15 @@ class PathObject:
         return self.path.as_posix()
 
     def __repr__(self):
-        return f"PathObject(path={self.path.as_posix()!r})"
+        return f"TaskPath(path={self.path.as_posix()!r})"
 
     def __truediv__(self, other):
         if isinstance(other, StringValue):
-            return PathObject(self.path.joinpath(other.value), location=other.location)
-        elif isinstance(other, PathObject):
-            return PathObject(self.path / other.path, location=other.location)
+            return TaskPath(self.path.joinpath(other.value), location=other.location)
+        elif isinstance(other, TaskPath):
+            return TaskPath(self.path / other.path, location=other.location)
         else:
-            top = self
-            bottom = other
-            raise TypeError(f"Unsupported operation: {top} / {bottom!r}")
-
-
-class BuildPathVariable:
-    location: FileLocation
-
-    def __init__(self, location=None):
-        self.location = location
-
-    def __str__(self):
-        return "$$$$$$BUILD$$$$$$$"
-
-
-class TargetOutput:
-    def __str__(self):
-        return "$$$$$TARGET-OUTPUT$$$$$"
+            raise TypeError(f"Unsupported operation: {self} / {other!r}")
 
 
 class PathElement:
@@ -255,7 +267,12 @@ class PathElement:
         parts = self.parts + other.parts
         return PathElement(*parts, resolved=resolved, location=other.location)
 
+    def __hash__(self):
+        return hash(self._path)
+
     def __repr__(self):
+        #if self.resolved:
+        #    return f'PathElement({self._as_path()}, resolved={self.resolved})'
         return f'PathElement({self._as_path()})'
 
     def with_suffix(self, suffix, **kwargs):
@@ -263,7 +280,6 @@ class PathElement:
         _path = self._as_path()
         _path = _path.with_suffix(suffix)
         return PathElement(*_path.parts, base=self.base, location=location)
-
 
     def __str__(self):
         if self.resolved:
@@ -300,54 +316,99 @@ class TargetOutputsReference:
 
     If output_id is not specified, return all the outputs.
     """
-    target: "TargetReferenceElement"
+    target: "TaskReferenceElement"
     output_name: Optional[StringValue] = None
 
 
-@dataclass(frozen=True)
-class TargetReferenceElement:
+class TaskReferenceElement:
     """
-    A reference to a target in a makex file: Target(name, path).
+    A reference to a Task in a makex file: Task(name, path).
 
-    Also synthesized when a string with : is passed to a target argument.
+    Also synthesized when a string with : is passed to a Task argument.
     """
     name: StringValue
-    path: Union[PathElement, StringValue] = None
-    location: FileLocation = None
+    path: Union[PathElement, StringValue]
+    location: FileLocation
+
+    __slots__ = ["name", "path", "location"]
+
+    def __init__(
+        self,
+        name: StringValue,
+        path: Union[PathElement, StringValue] = None,
+        location: FileLocation = None
+    ) -> None:
+        object.__setattr__(self, 'name', name)
+        object.__setattr__(self, 'path', path)
+        object.__setattr__(self, 'location', location)
 
     def __getattr__(self, item):
         if item in ["inputs", "outputs"]:
             return self.with_parameter
 
+    def __hash__(self):
+        # TODO: this needs improvement
+        if self.path:
+            return hash(self.name.value + str(self.path))
+
+        return hash(self.name.value)
+
+    def __eq__(self, other):
+        # TODO: this needs improvement
+        return self.name.value == other.name.value and self.path == other.path
+
     def __repr__(self):
         path = self.path
         if path is not None:
-            return f"TargetReferenceElement({self.name.value!r}, {path!r})"
+            return f"TaskReferenceElement({self.name.value!r}, {path!r})"
 
-        return f"TargetReferenceElement({self.name.value!r})"
+        return f"TaskReferenceElement({self.name.value!r})"
 
     def outputs(self, name=None):
         return TargetOutputsReference(self, name)
 
+    @classmethod
+    def from_strings(cls, name, path, location=None):
+        # TODO: offset the location correctly by column (not exactly correct but should work for how we use it).
+        return TaskReferenceElement(
+            StringValue(name, location=location),
+            StringValue(path, location=location) if path else None,
+            location=location
+        )
 
-@dataclass(frozen=True)
-class ResolvedTargetReference:
+
+class ImplicitRequirement:
+    def __init__(self, ref: TaskReferenceElement):
+        self.ref = ref
+
+    def __repr__(self):
+        return f"ImplicitRequirement({self.ref})"
+
+
+class ResolvedTaskReference:
     """
     Used in a target graph and for external matching.
     """
-    name: StringValue
+    name: Union[StringValue, str]
 
     # path the actual makex file containing the target
     path: Path
 
     # where this reference was defined
-    location: FileLocation = None
+    location: FileLocation
+
+    __slots__ = ["name", "path", "location"]
+
+    def __init__(self, name: StringValue, path: Path, location: FileLocation = None) -> None:
+        object.__setattr__(self, 'name', name)
+        object.__setattr__(self, 'path', path)
+        object.__setattr__(self, 'location', location)
 
     def key(self):
         return format_hash_key(self.name, self.path)
 
     def __eq__(self, other):
-        #assert isinstance(other, ResolvedTargetReference), f"Got {type(other)} {other}. Expected ResolvedTarget"
+        #assert isinstance(other, ResolvedTaskReference), f"Got {type(other)} {other}. Expected ResolvedTarget"
         assert hasattr(other, "key"), f"{other!r} has no key() method."
         assert callable(getattr(other, "key"))
         return self.key() == other.key()
@@ -363,11 +424,11 @@ class TargetType:
             # TODO: use step for variants.
             path, target, variants = subscript.start, subscript.stop, subscript.step
             if path is None and target:
-                return TargetReferenceElement(target)
+                return TaskReferenceElement(target)
             elif path and target is None:
                 raise PythonScriptError("Invalid target reference. Missing target name.", location)
             elif path and target:
-                return TargetReferenceElement(target, path, location=location)
+                return TaskReferenceElement(target, path, location=location)
         else:
             # handle target[item]
             # TODO: handle locations
@@ -376,12 +437,17 @@ class TargetType:
                     f"Subscript must be a string. Got {subscript!r} ({type(subscript)})",
                     location=location
                 )
-            return TargetReferenceElement(subscript, location=location)
+            return TaskReferenceElement(subscript, location=location)
 
 
 class FileObject(FileProtocol):
     path: PathLike
     location: FileLocation
+
+
+class EnvironmentVariableStringValue(StringValue):
+    def __init__(self, value: str, location=None):
+        super().__init__(value, location=location) #FileLocation(0, 0, path="ENVIRONMENT"))
 
 
 class EnvironmentVariableProxy:
@@ -395,12 +461,21 @@ class EnvironmentVariableProxy:
         if item is SENTINEL:
             raise PythonScriptError(f"Environment variable {key} not defined.", _location_)
 
-        if item in {None,False}:
+        if item in {None, False}:
             return item
 
         self.__usages[key] = item
 
-        return StringValue(item, location=_location_)
+        return EnvironmentVariableStringValue(item, location=_location_)
 
     def _usages(self):
         return self.__usages
+
+
+@dataclass(frozen=True)
+class TaskSelfReference:
+    property: str = None
+    location: FileLocation = None
+
+    def __getattribute__(self, item):
+        return TaskSelfReference(item, location=self.location)

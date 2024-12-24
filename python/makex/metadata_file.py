@@ -5,15 +5,15 @@ from makex.file_checksum import FileChecksum
 from makex.metadata import TargetWithValidKey
 from makex.protocols import FileStatus
 from makex.python_script import FileLocation
-from makex.target import EvaluatedTarget
+from makex.target import EvaluatedTask
 
 
 class MakexMetadataFile:
-    def __init__(self, path, targets: list[EvaluatedTarget]):
+    def __init__(self, path, targets: list[EvaluatedTask]):
         self.path: Path = path
-        self.targets: dict[EvaluatedTarget, EvaluatedTarget] = {}
+        self.targets: dict[EvaluatedTask, EvaluatedTask] = {}
 
-    def add_target(self, target: EvaluatedTarget):
+    def add_target(self, target: EvaluatedTask):
         self.targets[target] = target
 
     def write(self):
@@ -64,7 +64,7 @@ class MakexMetadataFile:
                     ) for input in obj.get("inputs", [])
                 ]
                 requires = [
-                    EvaluatedTarget(name=req.get("name"), path=Path(req.get("path")))
+                    EvaluatedTask(name=req.get("name"), path=Path(req.get("path")))
                     for req in obj.get("requires", [])
                 ]
 
@@ -73,7 +73,7 @@ class MakexMetadataFile:
                     objloc.get("line"), objloc.get("column"), objloc.get("path")
                 )
 
-                target = EvaluatedTarget(
+                target = EvaluatedTask(
                     name=obj.get("name"),
                     path=Path(obj.get("path")),
                     inputs=inputs,

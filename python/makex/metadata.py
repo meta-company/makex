@@ -10,7 +10,7 @@ from typing import (
 from makex.context import Context
 from makex.protocols import StringHashFunction
 from makex.python_script import FileLocation
-from makex.target import EvaluatedTarget
+from makex.target import EvaluatedTask
 
 
 class TargetWithValidKey:
@@ -141,7 +141,7 @@ class TargetMetadata:
     def from_evaluated_target(
         cls,
         ctx: Context,
-        target: EvaluatedTarget,
+        target: EvaluatedTask,
         hash_function: StringHashFunction,
         timing=None
     ) -> "TargetMetadata":
@@ -166,7 +166,7 @@ class TargetMetadata:
             requirement.hash(ctx, hash_function=hash_function)
         return c
 
-    def dirty(self, ctx: Context, target: EvaluatedTarget) -> Dirtyness:
+    def dirty(self, ctx: Context, target: EvaluatedTask) -> Dirtyness:
         # TODO: we don' really need this at the moment.
         # Manually evaluate the dirtyness of a target.
 

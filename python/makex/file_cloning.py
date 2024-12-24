@@ -139,7 +139,7 @@ elif sys.platform in {"darwin"}:
     else:
         SUPPORTED = True
 
-        _CHAR_P = ctypes.c_char_p
+        _C_CHAR_P = ctypes.c_char_p
         _C_INT = ctypes.c_int
         _clonefile = _libc.clonefile
         _clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
@@ -147,8 +147,8 @@ elif sys.platform in {"darwin"}:
 
         def _clone_file_platform(source, destination):
             result = _clonefile(
-                _CHAR_P(os.fsencode(source)),
-                _CHAR_P(os.fsencode(destination)),
+                _C_CHAR_P(os.fsencode(source)),
+                _C_CHAR_P(os.fsencode(destination)),
                 _C_INT(0),
             )
 

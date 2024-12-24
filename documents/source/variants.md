@@ -162,3 +162,97 @@ If the `example-variant` choice is not specified, `ARGS` shall be an Undetermine
 The execute function should error because of this undetermined value.
 
 Upon execution of tasks, actions like `execute()` should respond early when one of their arguments is undetermined.
+
+
+## branching/conditions based on variants (if_variant, if_not_variant)
+
+`if_variant(variant_specifier, *values)` can be used to vary the arguments to a task. 
+If the variant is in effect, the values are included in argument values; otherwise they are ignored.
+
+`if_not_variant()` is available which is the opposite of `if_variant`: if the variant is NOT in effect, the values are included
+in argument values.
+
+Variant specifier may be a string, or a set of strings (`variant_specifier = str|set[str]`).
+
+For example:
+
+```python
+
+task(
+  name="example",
+  requires=[
+    if_variant(variant_specifier, ":example-requirement")
+  ],
+  steps=[
+    if_variant(variant_specifier, execute(...))
+  ],
+  outputs=[
+  
+  ]
+)
+```
+
+TODO: or `if_true(variant_enabled(), ...)`
+
+
+##  branching entire tasks based on variants
+
+If you would like to enable/disable entire tasks based on the specified variant(s), the variants argument to tasks may be used to do so:
+
+For example:
+
+```python
+
+task(
+    name="example",
+    variants={"win32","macos"}
+)
+```
+
+The example task will only run for win32/macos variants.
+
+
+## Using a specific variant of a task from another
+
+```python
+
+task(
+    name="example",
+    requires=[
+        variant_of(":dep", "variant1")
+    ],
+    steps=[
+        # long hand task reference
+        copy(reference(":dep", "variant")),
+        copy(variant_of(":dep", "variant")),
+        
+        # rewire StringValue to retain binary operations
+        copy(vary(":dep", "variant" & "variant")),
+        
+        # copy both of the variants
+        copy(vary(":dep", AND("win32", "darwin"))),
+        
+        # copy one of the variants; depending on which one is active during running the task
+        copy(vary(":dep", OR("win32", "darwin"))),
+        
+        # ???
+        copy(vary(":dep", ONE_OF("win32", "darwin"))),
+        
+        # use a shorthand task reference
+        copy(task[:"dep":"variant"]),
+        
+        # shorthand string based references
+        copy(":dep:variant"),
+        copy(":dep:variant1 & variant2"),
+        
+    ]
+)
+
+
+task(
+    name="dep",
+    steps=[
+        # ... produce some output ...
+    ]
+)
+```

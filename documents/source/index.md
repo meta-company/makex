@@ -31,10 +31,12 @@
    makex-files
    configuration
    tasks
+   tasks-as-executables
    workspaces
    checksums
    caching
    trouble
+   history
    genindex
    
 .. toctree::
@@ -48,7 +50,6 @@
    runnables
    api
    authors
-   history
    proposals/makex-files-includes
    proposals/tasks-generating
    proposals/tasks-iterable-run-list

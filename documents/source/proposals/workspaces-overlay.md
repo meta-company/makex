@@ -1,4 +1,7 @@
-# Proposal: Overlay/Named Workspaces (DRAFT)
+---
+status: "Draft"
+---
+# Proposal: Overlay/Named Workspaces
 
 ```{note}
 Coming soon. Not implemented yet. These feature is up for discussion.

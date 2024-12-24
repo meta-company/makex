@@ -1,3 +1,7 @@
+---
+status: "Accepted"
+version: "20240401"
+---
 # Proposal: Makex File Macro/Functions
 
 ## Rationale

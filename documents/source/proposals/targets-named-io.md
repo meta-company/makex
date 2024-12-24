@@ -1,13 +1,17 @@
+---
+status: "Draft"
+---
+
 # Proposal: Named Inputs and Outputs
 
-In some cases, Targets may provide multiple named outputs (e.g. `.css` and `.css.map` files).
+Sometimes, Tasks may provide multiple named outputs (e.g. `.css` and `.css.map` files when compiling sass/css).
 
-Some targets may be written and understood more clearly if the input files have names/alias.
+Some tasks may be written and understood more clearly if the input files have names/alias.
 
-TODO: we may need an explicit inputs keyword argument to target to clear things up.
+DONE: we may need an explicit inputs keyword argument to task to clear things up.
 TODO: Retrieving inputs/outputs without a name specified should either [] or all inputs/outputs.
 TODO: Do we need separate namespaces for outputs/inputs files? (probably yes)
-TODO: Does referring to another target create an implicit dependency? (probably yes, configurable). 
+TODO: Does referring to another task create an implicit dependency? (probably yes, configurable). 
 
 ## Function for referring to named/anonymous inputs/outputs
 
@@ -16,39 +20,59 @@ TODO: Does referring to another target create an implicit dependency? (probably 
 # Target().outputs 
 # (harder for the ast. can't get location of outputs reference)
 # remote target
-Target("hello", "path/to/target").outputs.get("file")
+Task("hello", "path/to/target").outputs.get("file")
 
 # this should work because it's local:
-Target("hello").outputs.get("file")
+Task("hello").outputs.get("file")
 
 # get all outputs or nameless outputs
-Target("hello").outputs
+Task("hello").outputs
 
 # getitem slicing
 # short:
-target[name:path].outputs
+task[path:name].outputs
 
 # Explicit function handling both inputs/ouputs
-Target(name, path, outputs=None, inputs=None) # refers to target output path, or specific output
+Task(name, path, outputs=None, inputs=None) # refers to target output path, or specific output
 
 # simple and explicit
 # outputs() function
-outputs(target[name:path], *names:str|set[str])
-outputs("path:target", *names:str|set) # path:target shorthand
-outputs(":target", *names:str|set) # local target shorthand
-outputs("target", "path", *names:str|set) # explicit target/path; this syntax won't work with the others.
-outputs_of(target)
+outputs(task[name:path], *names:str|set[str])
+outputs("path:task", *names:str|set) # path:target shorthand
+outputs(":task", *names:str|set) # local target shorthand
+outputs("task", "path", *names:str|set) # explicit target/path; this syntax won't work with the others.
+outputs_of(task)
+
+# returning a object we can refer to named outputs/inputs
+outputs("//path:task").name
+inputs("//path:task").name
+
 # inputs() function (same as outputs)
-inputs(target_reference, *names)
+inputs(task_reference, *names)
 
 # unified namespace
 # cons: which files, outputs or inputs?
-files(target_reference, *names)
+files(task_reference, *names)
 
 
 # implicitly
 # anytime a target reference is passed into inputs or actions, refer to its outputs
 # executes that receive a dictionary shall flatten the values out as arguments.
+
+
+# strings
+# pros: no new keywords
+# cons: limits the names of tasks with dots
+"//path/to:task.outputs.name"
+"//path/to:task.outputs[0]"
+
+# sans dots (preferred)
+"//path/to:task:outputs.name"
+"//path/to:task:outputs[0]"
+
+# namespaced (too many colons)
+"outputs://path/to:task:name"
+"outputs://path/to:task:name"
 ```
 
 
@@ -60,8 +84,8 @@ Coming soon. Not implemented yet.
 This feature is up for discussion.
 ```
 
-The outputs of Targets can be named.
-This may be used to refer to specific outputs of a Target from within the target, or from another Target.
+The outputs of Tasks can be named.
+This may be used to refer to specific outputs of a Task from within the Task, or from another Task.
 
 The output() function is used to both define and refer to named outputs within a target.
 
@@ -72,7 +96,7 @@ For example:
 
 ```python
 
-target(
+task(
   name="hello",
   steps=[
       write(output("file"), "hello"),
@@ -87,7 +111,7 @@ target(
   ],
 )
 
-target(
+task(
   name="world",
   steps=[
       write(output("file"), "world"),
@@ -115,19 +139,19 @@ target(
 # error: f"{outputs('hello', id='file')}"
 # error: [for output in outputs('hello', id='file')]
 
-target(
+task(
   name="hello-world",
   steps=[
       # copies hello.txt and world.txt into the target output
-      copy(Target("hello").outputs.get("file")),
-      copy(Target("world").outputs.get("file")),
+      copy(Task("hello").outputs.get("file")),
+      copy(Task("world").outputs.get("file")),
       
       # or (*outputs* of):
       copy(outputs("hello", name="file")), # or name:set = {"file"}
       copy(outputs("world", name="file")), # or name:set = {"file"}
       
       # implicit all outputs or singular
-      copy(Target("hello"))
+      copy(Task("hello"))
   ]
 )
 
@@ -136,7 +160,7 @@ target(
 ### Using the outputs of a target as named inputs
 
 ```python
-  target(
+  task(
     requires=[
         # input from the outputs of target
         named("source", outputs("target", name="")),
@@ -162,16 +186,16 @@ The function input/inputs(name, ...) can be used to define and refer to named in
 
 ```python
 
-target(
+task(
     name="example",
     inputs = {
         "": [],
         "name": "hello-world.txt",
         # referring to the inputs/outputs of another target:
-        "external": target[path:name].outputs['name'],
+        "external": task[path:name].outputs['name'],
         
         # implicitly, all outputs or singular
-        "external": target[path:name],
+        "external": task[path:name],
     },
     requires=[
         # all bad ideas:

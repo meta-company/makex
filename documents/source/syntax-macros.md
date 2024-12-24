@@ -1,7 +1,11 @@
 # Macros
 
 ```{note}
-This is a new feature under discussion and subject to change. 
+This is a new/experimental feature and subject to change.
+
+The intent of this feature is to explore ideas in build systems. 
+
+This feature may be disabled or removed.
 ```
 
 Macros allow defining functions that create tasks or return values.

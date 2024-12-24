@@ -1,6 +1,6 @@
 # Hashes and Checksums
 
-Makex uses hashes (or checksums) as part of the execution process to reduce the Tasks requiring re-execution.
+Makex uses hashes (or checksums) as part of the execution process to reduce the number of Tasks requiring re-execution.
 
 ## Hashing Files
 
@@ -47,4 +47,9 @@ If a filesystem without extended attribute support is detected, Makex will fall 
 
 ```{note}
 Currently, this detection will fail if the filesystem is read-only.
+```
+
+
+```{todo}
+Document creating hashes offline for large files.
 ```

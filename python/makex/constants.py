@@ -14,10 +14,10 @@ CONFIG_NAME_1 = "makex.toml"
 CONFIG_NAME_2 = ".makex.toml"
 
 CONFIG_FILE_NAMES = [
-    ("toml","makex.toml"),
-    ("toml",".makex.toml"),
-    ("json","makex.json"),
-    ("json",".makex.json"),
+    ("toml", "makex.toml"),
+    ("toml", ".makex.toml"),
+    ("json", "makex.json"),
+    ("json", ".makex.json"),
 ]
 
 WORKSPACE_FILE_NAME = "WORKSPACE"
@@ -134,10 +134,12 @@ TARGET_GETITEM_ENABLED = False
 # sha1 is at least 2x as fast as shake/md5
 HASHING_ALGORITHM = "sha1"
 
-
 # If True, the task hash will be stored in any declared output files (in an extended attribute).
 STORE_TASK_HASH_IN_OUTPUT_FILES = False
 
-
 # Included files will have all globals available to them (defined prior to the include() call)
 PASS_GLOBALS_TO_INCLUDE = False
+
+
+# the marker/character between a path and a task in task locators
+TASK_PATH_NAME_SEPARATOR = ":"

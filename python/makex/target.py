@@ -4,6 +4,7 @@ from abc import (
     abstractmethod,
 )
 from dataclasses import dataclass
+from os import PathLike
 from pathlib import Path
 from typing import (
     Any,
@@ -23,34 +24,35 @@ from makex.context import Context
 from makex.protocols import (
     CommandOutput,
     FileStatus,
+    MakexFileProtocol,
     StringHashFunction,
 )
 from makex.python_script import FileLocation
 from makex.workspace import Workspace
 
-TargetKey = str
+TaskKey = str
 
 HASH_FUNCTION = getattr(hashlib, HASHING_ALGORITHM, "sha1")
 
 
-class TargetBase(ABC):
+class TaskBase(ABC):
     name: str
 
     @abstractmethod
-    def key(self) -> TargetKey:
+    def key(self) -> TaskKey:
         raise NotImplementedError()
-        #return format_hash_key(self.name, self.path)
+        # return format_hash_key(self.name, self.path)
 
 
 class Action(Protocol):
     location: FileLocation
 
-    def __call__(self, ctx: Context, target: "EvaluatedTarget") -> CommandOutput:
+    def __call__(self, ctx: Context, target: "EvaluatedTask") -> CommandOutput:
         # old Action function
         ...
 
     def run_with_arguments(
-        self, ctx: Context, target: "EvaluatedTarget", arguments: dict[str, Any]
+        self, ctx: Context, target: "EvaluatedTask", arguments: dict[str, Any]
     ) -> CommandOutput:
         ...
 
@@ -81,7 +83,7 @@ class InternalAction:
 
         return self.action.hash(ctx=ctx, arguments=self.arguments, hash_function=hash_function)
 
-    def __call__(self, ctx, target: "EvaluatedTarget") -> CommandOutput:
+    def __call__(self, ctx, target: "EvaluatedTask") -> CommandOutput:
 
         if getattr(self.action, "run_with_arguments", None):
             return self.action.run_with_arguments(ctx, target, self.arguments)
@@ -100,21 +102,11 @@ class Hasher:
         self._hash.update(string.encode("ascii"))
 
     def hex_digest(self, length=20):
-        return self._hash.hexdigest() #.hexdigest(length)
-
-
-class MakexFileProtocol(Protocol):
-    path: str
-    checksum: str
-    environment_hash: str
-    includes: list[str]
-
-    def hash_components(self) -> list[str]:
-        ...
+        return self._hash.hexdigest() # .hexdigest(length)
 
 
 @dataclass
-class EvaluatedTarget(TargetBase):
+class EvaluatedTask(TaskBase):
     """
     An "evaluated" target.
 
@@ -144,7 +136,7 @@ class EvaluatedTarget(TargetBase):
     inputs_dictionary: dict[Union[str, None], list[Path]] = None
 
     # references to targets this target requires.
-    requires: list["EvaluatedTarget"] = None
+    requires: list["EvaluatedTask"] = None
 
     actions: list[InternalAction] = None
 
@@ -153,6 +145,7 @@ class EvaluatedTarget(TargetBase):
 
     makex_file: MakexFileProtocol = None
 
+    # actual path to cache; symlinks resolved
     cache_path: Path = None
 
     @property
@@ -163,7 +156,7 @@ class EvaluatedTarget(TargetBase):
     def key(self):
         return format_hash_key(self.name, self.makex_file.path)
 
-    def __eq__(self, other: "EvaluatedTarget"):
+    def __eq__(self, other: "EvaluatedTask"):
         keyfunc = getattr(other, "key", None)
         assert keyfunc is not None
         assert callable(keyfunc)
@@ -173,14 +166,14 @@ class EvaluatedTarget(TargetBase):
         return hash(self.key())
 
     def __repr__(self):
-        return f"EvaluatedTarget(\"{self.key()}\")" #, requires={self.requires!r})"
+        return f"EvaluatedTask(\"{self.key()}\")" # , requires={self.requires!r})"
 
     def hash(
         self,
         ctx: Context,
         hash_function: StringHashFunction = None,
         hasher: Type[Hasher] = None,
-        hash_cache: dict[str, "EvaluatedTarget"] = None,
+        hash_cache: dict[str, "EvaluatedTask"] = None,
     ) -> str:
         hash_function = hash_function or target_hash
         hasher = hasher or Hasher
@@ -231,7 +224,7 @@ class EvaluatedTarget(TargetBase):
             # XXX: Inputs lists can be large (find()/glob()); optimize by using Hasher.update into one value.
             _hasher = hasher()
             for input in self.inputs:
-                #data.append(f"input-file:{str(input.checksum)}")
+                # data.append(f"input-file:{str(input.checksum)}")
                 _hasher.update(f"input-file:{str(input.checksum)}")
             data.append(f"input-files:{_hasher.hex_digest()}")
 
@@ -243,30 +236,37 @@ def target_hash(data: str):
     return HASH_FUNCTION(data.encode()).hexdigest()
 
 
-def format_hash_key(name: str, path: str):
+def format_hash_key(name: str, path: Union[PathLike, str]):
     return f"{path}:{name}"
 
 
-class EvaluatedTargetGraph:
+class EvaluatedTaskGraph:
+    targets: dict[TaskKey, EvaluatedTask]
+    _requires: dict[TaskKey, list[EvaluatedTask]]
+    _provides: dict[TaskKey, set[EvaluatedTask]]
+    _input_files: dict[Path, set[EvaluatedTask]]
+
     def __init__(self):
-        self.targets: dict[TargetKey, EvaluatedTarget] = {}
+        self.targets = {}
 
         # list of requires for each target
-        self._requires: dict[TargetKey, list[EvaluatedTarget]] = {}
+        self._requires = {}
 
         # list of targets that each target directly provides to
-        self._provides: dict[TargetKey, set[EvaluatedTarget]] = {}
+        self._provides = {}
 
         # targets requiring files Path -> list of targets
 
         # targets for input files
-        self._input_files: [Path, set[EvaluatedTarget]] = {}
+        self._input_files = {}
 
-    def add_target(self, target: EvaluatedTarget):
+    def add_target(self, target: EvaluatedTask):
         # NOTE: all requires MUST be added first
-        assert isinstance(target, EvaluatedTarget), f"Got {type(target)}: {target!r}"
+        assert isinstance(target, EvaluatedTask), f"Got {type(target)}: {target!r}"
         key = target.key()
         self.targets[key] = target
+
+        # TODO: store in an alternate key for the folder default tasks
 
         # build edges from require -> target
         for require in target.requires:
@@ -276,20 +276,21 @@ class EvaluatedTargetGraph:
         for path in target.inputs:
             self._input_files.setdefault(path, set()).add(target)
 
-    SimpleGraph = tuple[EvaluatedTarget, Iterable["SimpleGraph"]]
+    SimpleGraph = tuple[EvaluatedTask, Iterable["SimpleGraph"]]
 
-    def get_affected_graph(self, paths: Iterable[Path], scope: Path = None) -> SimpleGraph:
-
+    def get_affected_graph(self, paths: Iterable[Path], scopes: list[Path] = None) -> SimpleGraph:
         seen = set()
 
         # Performance optimization for possibly large numbers of paths
         scope_check = lambda target: True
 
-        if scope:
-            scope_check = lambda target: target.input_path.is_relative_to(scope)
+        if scopes:
+
+            def scope_check(target: EvaluatedTask):
+                return self._scope_list_check(scopes, target.input_path)
 
         for path in paths:
-            targets: set[EvaluatedTarget] = self._input_files.get(path, None)
+            targets: set[EvaluatedTask] = self._input_files.get(path, None)
 
             if targets is None:
                 continue
@@ -300,19 +301,19 @@ class EvaluatedTargetGraph:
                 if key in seen:
                     continue
 
-                if not scope_check(scope):
+                if not scope_check(target):
                     continue
 
-                yield (target, self.get_requires_graph(target, scope=scope, recursive=True))
+                yield (target, self.get_requires_graph(target, scopes=scopes, recursive=True))
 
                 seen.add(key)
 
     def get_affected(
         self,
         paths: Iterable[Path],
-        scope: Path = None,
+        scopes: list[Path] = None,
         depth=0,
-    ) -> Iterable[EvaluatedTarget]:
+    ) -> Iterable[EvaluatedTask]:
         """
         Return targets affected by the input files.
 
@@ -332,11 +333,13 @@ class EvaluatedTargetGraph:
         # Performance optimization for possibly large numbers of paths
         scope_check = lambda target: True
 
-        if scope:
-            scope_check = lambda target: target.input_path.is_relative_to(scope)
+        if scopes:
+
+            def scope_check(target: EvaluatedTask):
+                return self._scope_list_check(scopes, target.input_path)
 
         for path in paths:
-            targets: set[EvaluatedTarget] = self._input_files.get(path, None)
+            targets: set[EvaluatedTask] = self._input_files.get(path, None)
 
             if targets is None:
                 continue
@@ -347,24 +350,35 @@ class EvaluatedTargetGraph:
                 if key in seen:
                     continue
 
-                if not scope_check(scope):
+                if not scope_check(target):
                     continue
 
                 yield target
-                yield from self.get_requires(target, scope=scope, depth=depth)
+                yield from self.get_requires(target, scopes=scopes, depth=depth)
 
                 seen.add(key)
 
-    def get_target(self, target: TargetBase) -> Optional[EvaluatedTarget]:
+    def get_target(self, target: TaskBase) -> Optional[EvaluatedTask]:
         return self.targets.get(target.key(), None)
+
+    def get_task2(self, task_name: str, path: str) -> Optional[EvaluatedTask]:
+        return self.targets.get(format_hash_key(task_name, path), None)
+
+    def _scope_list_check(self, scopes, path):
+        for scope in scopes:
+
+            if path.is_relative_to(scope):
+                return True
+
+        return False
 
     def get_requires(
         self,
-        target: EvaluatedTarget,
-        scope: Path = None,
+        target: EvaluatedTask,
+        scopes: list[Path] = None,
         depth=0,
         _depth=None,
-    ) -> Iterable[EvaluatedTarget]:
+    ) -> Iterable[EvaluatedTask]:
         # return the requirements as an iterable
         _depth = -1 if _depth is None else _depth
 
@@ -372,28 +386,26 @@ class EvaluatedTargetGraph:
             return iter([])
 
         for require in target.requires:
-            if scope is not None and require.input_path.is_relative_to(scope) is False:
+            if scopes is not None and self._scope_list_check(scopes, require.input_path) is False:
                 continue
 
-            yield from self.get_requires(require, scope=scope, depth=depth, _depth=_depth)
+            yield from self.get_requires(require, scopes=scopes, depth=depth, _depth=_depth)
             yield require
 
-    def get_requires_graph(
-        self,
-        target: EvaluatedTarget,
-        scope: Path = None,
-        recursive=True,
-    ) -> Iterable[SimpleGraph]:
+    def get_requires_graph(self,
+                           target: EvaluatedTask,
+                           scopes: list[Path] = None,
+                           recursive=True) -> Iterable[SimpleGraph]:
         # return the requirements as a graph
         for require in target.requires:
             # TODO: linux platforms can optimize this with a str.starts_with check
-            if scope is not None and require.input_path.is_relative_to(scope) is False:
+            if scopes is not None and self._scope_list_check(scopes, require.input_path) is False:
                 continue
 
-            graph = self.get_requires_graph(target, scope, recursive=recursive)
+            graph = self.get_requires_graph(target, scopes, recursive=recursive)
             yield (target, graph)
 
-    def get_inputs(self, target: EvaluatedTarget, recursive=True) -> Iterable[Path]:
+    def get_inputs(self, target: EvaluatedTask, recursive=True) -> Iterable[Path]:
         """
         yields the inputs of target and required targets.
 
@@ -409,7 +421,7 @@ class EvaluatedTargetGraph:
         for input in target.inputs:
             yield input
 
-    def get_outputs(self, target: EvaluatedTarget, recursive=True) -> Iterable[Path]:
+    def get_outputs(self, target: EvaluatedTask, recursive=True) -> Iterable[Path]:
         for require in target.requires:
             yield from self.get_outputs(require, recursive=recursive)
 
@@ -417,10 +429,10 @@ class EvaluatedTargetGraph:
             yield output
 
 
-def brief_target_name(ctx: Context, target: "EvaluatedTarget", color=False):
-    #path = target.input_path
+def brief_task_name(ctx: Context, target: "EvaluatedTask", color=False):
+    # path = target.input_path
     path = Path(target.location.path)
-    #if path.name in ["Makefilex", "Makexfile"]:
+    # if path.name in ["Makefilex", "Makexfile"]:
     #    path = path.parent
 
     if color:
@@ -440,13 +452,18 @@ class ArgumentData(dict):
     # the actual argument values passed to be cached and passed around
     arguments: dict[str, Any]
 
+    # any requirements recovered from task action arguments
+    # these will be added as implicit dependencies
+    requirements: list[TaskKey]
+
     errors: list[Exception] = None
 
-    def __init__(self, arguments=None, inputs=None, errors=None):
+    def __init__(self, arguments=None, inputs=None, errors=None, requirements=None):
         super().__init__()
         self.arguments = arguments or {}
         self.inputs = inputs
         self.errors = errors or []
+        self.requirements = requirements or []
 
     def get(self, key, default=None):
         return self.arguments.get(key, default)

@@ -1,3 +1,7 @@
+---
+status: "Accepted"
+version: "20240401"
+---
 # Proposal: Makex File Includes
 
 Common macros/functions to generate targets are desired.

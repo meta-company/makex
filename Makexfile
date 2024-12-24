@@ -2,6 +2,11 @@
 """
 Note: This file must be run with the MAKEX_DEVELOPER environment variable to something True.
 
+Build/Deploy
+
+- use the pypi task to build/deploy the latest version to pypi. you'll need twine set up properly.
+- use the upload-documents task to upload the latest version of the documentation.
+
 """
 
 # Python interpreter to use to create a virtual environment:
@@ -10,8 +15,10 @@ PYTHON = "python3"
 VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
-# NOTE: This must be updated on new release versions.
-VERSION = Environment.get("MAKEX_VERSION", "20240601")
+# NOTE: This must be updated on new release versions (YYYYMMSS[equence]).
+VERSION = "20241201"
+
+CHANGE = Environment.get("CHANGE", "")
 
 PYPROJECT_TOML = source() / "python" / "pyproject.toml"
 
@@ -34,7 +41,7 @@ task(
         "html/index.html",
     ],
     steps=[
-        # Set the environment for future runnables.
+        # Set the environment for future actions.
         environment(
             BUILDDIR=task_path("documents-html"),
             LC_ALL="C",
@@ -44,11 +51,20 @@ task(
             f"source {VENV}/bin/activate",
             f"make -e -C documents clean html",
         ),
-        print(f"Documents available at {task_path('documents-html')}/html/index.html")
+        print(f"Documents available at file://{task_path('documents-html')}/html/index.html")
         # all three of these are the same:
         #shell(f"xdg-open $PWD/_output_/documents-html/html/index.html")
         #shell(f"xdg-open {path('documents-html')}/html/index.html")
         #execute("xdg-open", path('documents-html') / "html/index.html")
+    ],
+)
+
+task(
+    name="upload-documents",
+    steps=[
+        execute(
+            "upload-documents", "makex", VERSION, "--latest", task_path("documents-html") / "html"
+        ),
     ],
 )
 
@@ -69,7 +85,7 @@ task(
             ["scripts/completions/makex.bash", "scripts/completions/makex.zsh"],
             "python/makex/data/completions"
         ),
-        write("python/makex/version.py", f"""VERSION="{VERSION}"\n"""),
+        write("python/makex/version.py", f"""VERSION="{VERSION}"\nCHANGE="{CHANGE}"\n"""),
     ],
 )
 
@@ -190,10 +206,11 @@ task(
             #"preamble=\"$(cat scripts/bash-completion/makex-preamble.bash)\"",
             #f"cd python && shtab --shell=bash -u makex.__main__.parser --preamble \"${{preamble}}\" | tee {source('scripts/bash-completion/makex.bash')}", #
             "cd python",
-            f"python -m makex completions --shell bash {source('scripts/completions/makex.bash')}", #
-            f"python -m makex completions --shell zsh {source('scripts/completions/makex.zsh')}", #
+            f"{PYTHON} -m makex completions --shell bash {source('scripts/completions/makex.bash')}", #
+            f"{PYTHON} -m makex completions --shell zsh {source('scripts/completions/makex.zsh')}", #
         )
-    ]
+    ],
+    outputs=[source('scripts/completions/makex.bash'), source('scripts/completions/makex.zsh')]
     # makex completions --print bash > ~/.local/share/bash-completion/completions/makex
 )
 
@@ -209,6 +226,8 @@ task(
 )
 
 
+# test creating a task using a macro
+# todo: test creating action or list of actions with a macro
 @macro
 def nuitka_target_command_line(
     name,
@@ -238,6 +257,8 @@ def nuitka_target_command_line(
     NUITKA_ARGS += ["--nofollow-import-to=pytest"]
     NUITKA_ARGS += ["--standalone", "--onefile"]
     NUITKA_ARGS += ["--clang"]
+    NUITKA_ARGS += ["--static-libpython=yes"]
+
     NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
     NUITKA_ARGS += ["--prefer-source-code"]
     NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
@@ -269,6 +290,7 @@ nuitka_target_command_line(
         "--nofollow-import-to=shtab",
     ]
 )
+# TODO: call(":nuitka_target_command_line", ...)
 
 BUILD_NUITKA = task_path("nuitka")
 PYTHON_PACKAGE = "makex"
@@ -289,6 +311,7 @@ NUITKA_ARGS += ["--nofollow-import-to=shtab"]
 NUITKA_ARGS += ["--nofollow-import-to=pytest"]
 NUITKA_ARGS += ["--standalone", "--onefile"]
 NUITKA_ARGS += ["--clang"]
+#NUITKA_ARGS += ["--static-libpython=yes"]
 NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
 NUITKA_ARGS += ["--prefer-source-code"]
 NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
@@ -303,7 +326,7 @@ task(
             PYTHONPATH=source("python"),
             CCFLAGS="-march=native -mtune=native -Os",
         ),
-        execute(VENV_BIN / "nuitka3", NUITKA_ARGS, source("python/makex/__main__.py"))
+        execute(VENV_BIN / "nuitka", NUITKA_ARGS, source("python/makex/__main__.py"))
     ]
 )
 
@@ -320,7 +343,6 @@ task(
         )
     ]
 )
-
 
 ### Build RPM:
 
@@ -351,7 +373,9 @@ task(
     steps=[
         execute("mkdir", RPM_SOURCES_FOLDER),
         copy("packaging/makex.sh", "SOURCES"),
-        shell(f"cd {task_path('source-package')} && zip -r {RPM_SOURCES_FOLDER}/makex-source.zip *"),
+        shell(
+            f"cd {task_path('source-package')} && zip -r {RPM_SOURCES_FOLDER}/makex-source.zip *"
+        ),
 
         # TODO: use this instead
         #archive(
@@ -363,4 +387,10 @@ task(
         #),
         execute("rpmbuild", RPMBUILD_FLAGS, "-v", "-ba", "packaging/makex.spec"),
     ]
+)
+
+# test out pyoxidizer
+task(
+    name="pyoxidizer",
+    steps=[execute("pyoxidizer", "build", "--var", "build_path", task_path("pyoxidizer"))]
 )

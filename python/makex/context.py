@@ -23,11 +23,16 @@ from makex.constants import (
     OUTPUT_DIRECTORY_NAME,
     WORKSPACE_FROM_CONFIGURATION_ENABLED,
 )
-from makex.errors import CacheError
+from makex.errors import (
+    CacheError,
+    ErrorCategory,
+    ErrorLevel,
+)
 from makex.file_system import (
     safe_reflink,
     same_fs,
 )
+from makex.flags import IMPLICIT_REQUIREMENTS_ENABLED
 from makex.patterns import combine_patterns
 from makex.platform_object import PlatformObject
 from makex.ui import UI
@@ -58,7 +63,9 @@ class Context:
     # graph is used everywhere so it is attached to context
     # TODO: rename as we need two graphs (graph1 and graph2).
     # TODO: this doesn't really need to be in this Context object
-    graph: "TargetGraph" = None
+    graph: "makex.makex_file_parser.TargetGraph" = None
+
+    graph_2: "makex.target.EvaluatedTaskGraph" = None
 
     # platform query is used everywhere
     platform: PlatformObject = None
@@ -116,11 +123,26 @@ class Context:
     # name of the output directory/link (_output_)
     output_folder_name = OUTPUT_DIRECTORY_NAME
 
+    # names of folders/files we should ignore.
+    ignore_names = {output_folder_name}
+
     dry_run: bool = False
 
     # True if copy on write is enabled on the workspace and cache.
     # this will automatically be detected.
     copy_on_write = False
+
+    # Change the way implicit requirements are handled:
+    # If True, implicit requirements will be added when discovered.
+    # If False, implicit requirements will be disabled entirely.
+    implicit_requirements = IMPLICIT_REQUIREMENTS_ENABLED
+
+    # Change the way errors are handled/reported.
+    # Each category may be one of OFF/ERROR/WARNING
+    error_levels = {
+        ErrorCategory.IMPLICIT_REQUIREMENT_ADDED: ErrorLevel.WARNING,
+        ErrorCategory.DUPLICATE_TASK: ErrorLevel.ERROR,
+    }
 
     @property
     def workspace_path(self):

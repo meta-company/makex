@@ -17,6 +17,10 @@ from abc import (
 )
 from collections import deque
 from copy import copy
+from dataclasses import (
+    dataclass,
+    field,
+)
 from io import StringIO
 from os import PathLike
 from pathlib import Path
@@ -31,6 +35,7 @@ from typing import (
 
 LOGGER = logging.getLogger("python-script")
 STRING_VALUE_NAME = "_STRING_"
+JOINED_STRING_VALUE_NAME = "_JOINED_STRING_"
 LIST_VALUE_NAME = "_LIST_"
 GLOBALS_NAME = "_GLOBALS_"
 FILE_LOCATION_NAME = "_LOCATION_"
@@ -137,11 +142,17 @@ class BaseScriptEnvironment(ABC):
         raise NotImplementedError
 
 
+class FileLocationProtocol(Protocol):
+    line: int
+    column: int
+    path: str
+
+
 class PythonScriptError(Exception):
     path: Path = None
-    location: FileLocation = None
+    location: FileLocationProtocol = None
 
-    def __init__(self, message, location: FileLocation):
+    def __init__(self, message, location: FileLocationProtocol):
         super().__init__(str(message))
         self.wraps = Exception(message) if isinstance(message, str) else message
         self.location = location
@@ -218,7 +229,43 @@ class StringValue(str):
     def __add__(self, other):
         return StringValue(self.value + other.value, getattr(other, "location", self.location))
 
+    def __hash__(self):
+        return hash(self.value)
+
+    def __eq__(self, other):
+        if isinstance(other, StringValue):
+            return self.value == other.value
+        elif isinstance(other, str):
+            return self.value == other
+        else:
+            return False
+
     # TODO: __add__ with a non-string should return an internal JoinedString
+
+
+class JoinedString:
+    """
+        Special type to allow deferring the evaluation of joined strings (and values inside of them).
+
+        Once ready to evaluate, call evaluate() to produce a StringValue which may be used more normally.
+
+    """
+    __slots__ = ["parts", "location"]
+
+    def __init__(self, parts, location=None):
+        self.parts = parts
+        self.location = location
+
+    def evaluate(self, data=None) -> StringValue:
+        # use the variables/functions in data to evaluate the string parts
+        return StringValue("".join(self._evaluate(data)), location=self.location)
+
+    def _evaluate(self, data):
+        for part in self.parts:
+            if eval_func := getattr(part, "evaluate", None):
+                yield eval_func(data)
+            else:
+                yield part
 
 
 class _DisableImports(ast.NodeVisitor):
@@ -336,8 +383,9 @@ class _TransformStringValues(ast.NodeTransformer):
     """
     Transform string and f-strings to be wrapped in a StringValue() with a FileLocation.
     """
-    def __init__(self, path: PathLike):
+    def __init__(self, path: PathLike, late_joined=False):
         self.path = path
+        self.late_joined = late_joined
 
     def visit_Call(self, node: ast.Call) -> Any:
         if node.func and isinstance(node.func, ast.Name) and node.func.id == FILE_LOCATION_NAME:
@@ -386,16 +434,27 @@ class _TransformStringValues(ast.NodeTransformer):
 
         file_location = create_file_location_call(self.path, line, offset)
 
-        # TODO: separate the values into JoinedString class so we can evaluate later.
-        strcall = ast.Call(
-            func=ast.Name(id=STRING_VALUE_NAME, ctx=ast.Load()),
-            args=[node],
-            keywords=[
-                ast.keyword(arg='location', value=file_location),
-            ],
-            lineno=line,
-            col_offset=offset,
-        )
+        if self.late_joined:
+            # TODO: separate the values into JoinedString class so we can evaluate later.
+            strcall = ast.Call(
+                func=ast.Name(id=JOINED_STRING_VALUE_NAME, ctx=ast.Load()),
+                args=node.values,
+                keywords=[
+                    ast.keyword(arg='location', value=file_location),
+                ],
+                lineno=line,
+                col_offset=offset,
+            )
+        else:
+            strcall = ast.Call(
+                func=ast.Name(id=STRING_VALUE_NAME, ctx=ast.Load()),
+                args=[node],
+                keywords=[
+                    ast.keyword(arg='location', value=file_location),
+                ],
+                lineno=line,
+                col_offset=offset,
+            )
         self.generic_visit(node)
 
         ast.fix_missing_locations(strcall)
@@ -565,22 +624,20 @@ class _TransformListValues(ast.NodeTransformer):
         line = node.lineno
         offset = node.col_offset
 
+        file_location = create_file_location_call(self.path, line, offset)
         _node = ast.Call(
             func=ast.Name(id=LIST_VALUE_NAME, ctx=ast.Load(), lineno=line, col_offset=offset),
             args=[node],
-            keywords=[],
+            keywords=[
+                ast.keyword(
+                    arg=FILE_LOCATION_ARGUMENT_NAME,
+                    value=file_location,
+                    lineno=line,
+                    col_offset=offset
+                )
+            ],
             lineno=line,
             col_offset=offset,
-        )
-
-        file_location = create_file_location_call(self.path, line, offset)
-        _node.keywords.append(
-            ast.keyword(
-                arg=FILE_LOCATION_ARGUMENT_NAME,
-                value=file_location,
-                lineno=line,
-                col_offset=offset
-            )
         )
 
         #for child in ast.iter_child_nodes(node):
@@ -593,16 +650,22 @@ class _TransformListValues(ast.NodeTransformer):
     visit_ListComp = visit_List
 
 
-class Options:
-    pre_visitors: list
-    post_visitors: list
-
-    imports_enabled: bool
-    import_function: Callable
-    disable_assigment_names: set
-
-
 class PythonScriptFile:
+    @dataclass
+    class Options:
+        pre_visitors: list = field(default_factory=list)
+        post_visitors: list = field(default_factory=list)
+
+        imports_enabled: bool = False
+        import_function: Optional[Callable] = None
+        disable_assigment_names: set = field(default_factory=set)
+        late_joined_string = False
+        transform_lists = True
+
+        # False: none
+        # True: Use default
+        builtins = False
+
     def __init__(
         self,
         path: PathLike,
@@ -612,8 +675,8 @@ class PythonScriptFile:
         pre_visitors=None,
         extra_visitors=None,
         enable_imports=False,
+        options=None,
     ):
-        #self._env = env
         self.path = str(path)
         self.globals = globals or {}
         self.disable_assignment_names = set()
@@ -621,6 +684,14 @@ class PythonScriptFile:
         self.pre_visitors = pre_visitors or []
         self.enable_imports = enable_imports
         self.importer = importer or self._importer
+        self.options = options
+        if options:
+            self.extra_visitors = options.post_visitors
+            self.pre_visitors = options.pre_visitors
+            self.importer = options.import_function
+            self.enable_imports = options.imports_enabled
+            self.disable_assignment_names = options.disable_assigment_names
+            self.late_joined_string = options.late_joined_string
 
     def _ast_parse(self, f: BinaryIO):
         # XXX: must be binary due to the way hash_contents works
@@ -759,7 +830,7 @@ class PythonScriptFile:
         return code
 
 
-def pretty_exception(exception, location: FileLocation):
+def pretty_exception(exception, location: FileLocationProtocol):
     # TODO: remove colors from this pretty_exception
     buf = StringIO()
     buf.write(f"Error inside a Makexfile '{location.path}:{location.line}'\n\n")

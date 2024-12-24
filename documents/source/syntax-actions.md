@@ -4,6 +4,49 @@
 Each task can accept a list of "Actions" that will be run when the task is executed.
 
 
+## execute()
+
+```{eval-rst}
+.. py:function:: execute(*executable:Union[str|PathLike,list[str|PathLike]])
+  
+  Execute an executable. 
+  
+  Executables are run from the task's source folder (the input root).
+  
+  The first value in executable is the executable to run. 
+  This may be a relative path (to a source folder), an absolute path, the name of an executable, or the reference/output of another task.
+  If it's a name (without any slashes), it will be searched for in the folders defined inside the PATH environment variable.
+  
+  Followed by the executable is a variable number of arguments passed to the executable. 
+  
+  List values in any arguments are "flattened".
+  
+  Any arguments which evaluate to None will not be included when running the executable.
+  
+  To execute the output of another Task, you must specify the task name and path of the Task (for example, `execute("//path:task_name", ...)`). 
+  See {ref}`Tasks as executables<tasks-as-executables>` for more information. 
+  
+  .. note:: 
+  
+    Arguments should be quoted and separated as required by the executable.
+    Typically, this means passing each argument and value as a separate string.
+   
+  .. note::
+   
+    Arguments are passed to the executable as is, with no shell expansion. 
+    If you use `~` to denote a home directory, you will need to expand it, or use the :func:`home()<home>` or :func:`shell()<shell>` functions.
+  
+  .. If you need system specific shell/variable expansion,
+     use the expand() function.
+   
+  .. note::
+  
+    When the executable is a reference to the output of another task, currently, the first declared unnamed output of the referred Task is used as the executable.
+    The referenced Task should be included in executing task's requirements, though it may be automatically added (implicitly, by configuration).
+    For more on this, see Executing the Output of a Task from another Task.
+```
+
+
 ## copy()
 
 ```{eval-rst}
@@ -23,13 +66,13 @@ Each task can accept a list of "Actions" that will be run when the task is execu
   
   An Execution error will be raised if the destination exists, and it is not a directory.
   
-  :param Union[PathLike,list[PathLike]] paths: Paths to the file(s) or folder(s) to copy. Relative paths are resolved relative to the makex file.
+  :param Union[PathLike,list[PathLike]] paths: Paths to the file(s) or folder(s) to copy. Relative paths are resolved relative to the makex file (or source folder).
   
   :param PathLike destination: The destination. May be a path relative to the task output path, or an absolute path.
 ```
 
 ```{note}
-Makex uses file cloning (or reflinks) for lightweight/copy-on-write copies of files where available (bcachefs, btrfs, XFS, OCFS2, ZFS (unstable), APFS and ReFSv2).   
+Makex uses file cloning/copy-on-write/reflinks for lightweight copies of files on supporting filesystems (bcachefs, btrfs, XFS, OCFS2, ZFS (unstable), APFS and ReFSv2).   
 ```
 
 ```{todo}
@@ -45,7 +88,7 @@ copy(file)
 # copy a folder to the Task output
 copy(folder)
 
-# copy folder to the specified Folder
+# copy folder to the specified Folder (relative to the task output)
 copy(folder, folder)
 
 # list forms:
@@ -53,13 +96,13 @@ copy(folder, folder)
 # copy a list of files to the Task output
 copy(files)
 
-# copies a set of files to the specified folder.
+# copies a set of files to the specified folder (relative to the task output).
 copy(files, folder)
 
 # copy a list of folders to the Task output
 copy(folders) 
 
-# copies a set of folders to the specified folder..
+# copies a set of folders to the specified folder (relative to the task output).
 copy(folders, folder) 
 
 ```
@@ -88,35 +131,6 @@ copy(file, file)
 ```
 
 
-## execute()
-
-```{eval-rst}
-.. py:function:: execute(*executable:Union[str|PathLike,list[str|PathLike]])
-  
-  Execute an executable. 
-  
-  Executables are run from the task's directory (the input root).
-  
-  The first value in executable is the executable to run. This may be a relative (to the task's directory) path, a absolute path, or a name of an executable.
-  If it's a name (without any slashes), it will be searched for in the paths defined inside the PATH environment variable.
-  
-  Followed by the executable is a variable number of arguments passed to the executable. 
-  
-  List values in any arguments are "flattened".
-  
-  Any arguments which evaluate to None will not be included when running the executable. 
-   
-  .. note::
-   
-    Arguments are passed to the executable as is, with no shell expansion. 
-    If you use `~` to denote a home directory, you will need to expand it, or use the :func:`shell()<shell>` function.
-  
-  .. If you need system specific shell/variable expansion,
-     use the expand() function.
-   
-  Arguments should be quoted and separated as required by the executable.
-  Typically, this means passing each argument and value as a separate string.
-```
 <!--
 ## mirror()
 
@@ -178,7 +192,7 @@ This action is experimental and subject to change.
     
     Makex may a adopt a "strict" mode where all shell scripting is disabled.
   
-  By default, Makex will use the detected/system shell (usually, `sh`, or the Bourne Shell). A shell can be specified in configuration, but it's
+  By default, Makex will use the detected/system shell (usually, `sh`, or the Bourne Shell `bash`). A shell can be specified in configuration, but it's
   recommened to leave it to autodetect based on platform. 
     
   The passed script is prefixed with a preamble by default: 
@@ -187,8 +201,8 @@ This action is experimental and subject to change.
   
     set -Eeuo pipefail
   
-  :param script: The script/command line to run. If a list of strings, the items will concatenated with new lines separators
-    and run in one process/shell.
+  :param script: The script/command line to run. If a list of strings, the strings will concatenated with new line separators
+    and run in *one* process/shell.
   :type script: Union[String,list[String]]
   
   .. note::
@@ -206,7 +220,9 @@ This action is experimental and subject to change.
   
   Writes `data` to `file`.
   
-  :param PathLike file: The destination file. May be a Workspace path, an absolute path, or relative path within the Task's output path.
+  Any intermediate folders specified in the file path will be created as necessary.
+  
+  :param PathLike file: The destination file. May be a Workspace path, an absolute path (if allowed), or relative path within the Task's output path.
   :param Union[str,list[str]] data: The data to write, may be a list of strings which will be concatenated.
   :param bool executable: Ensure the file is executable.
 ```

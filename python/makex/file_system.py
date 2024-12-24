@@ -7,6 +7,7 @@ from pathlib import Path
 from shutil import copy2
 from typing import (
     Iterable,
+    Optional,
     Pattern,
     Union,
     cast,
@@ -42,33 +43,33 @@ class ItemType(Enum):
 
 def find_files(
     path: Union[str, bytes, os.PathLike, DirEntry],
-    pattern: Pattern = None,
-    ignore_pattern: Pattern = None,
-    ignore_names: set = None,
+    pattern: Optional[Pattern] = None,
+    ignore_pattern: Optional[Pattern] = None,
+    ignore_names: Optional[set] = None,
     symlinks=False,
 ) -> Iterable[Path]:
     """
     Find files. Use os.scandir for performance.
 
-    :param path:
-    :param pattern:
-    :param ignore_pattern:
-    :param ignore_names:
-    :param symlinks:
+    :param path: The path to start the search from.
+    :param pattern: A pattern of file names to include. Should match a full path.
+    :param ignore_pattern: A pattern of file names to ignore. Should match a full path.
+    :param ignore_names: Set of names to quickly check for ignores; faster than using the pattern.
+    :param symlinks: Yield symlink files.
     :return:
     """
     #trace("Find files in %s: pattern=%s ignore=%s", path.path if isinstance(path, DirEntry) else path, pattern, ignore_names)
     ignore_names = ignore_names or set()
 
     # XXX: Performance optimization for many calls.
-    _ignore_match = ignore_pattern.match
+    _ignore_match = ignore_pattern.match if ignore_pattern else None
     _pattern_match = pattern.match if pattern else None
 
     # TODO: scandir may return bytes: https://docs.python.org/3/library/os.html#os.scandir
     for entry in os.scandir(path):
         entry = cast(DirEntry, entry)
         name = entry.name
-        path = entry.path
+        _path = entry.path
 
         if name in ignore_names:
             continue
@@ -82,16 +83,16 @@ def find_files(
             )
         elif entry.is_file():
 
-            if ignore_pattern and _ignore_match(path):
+            if ignore_pattern and _ignore_match(_path):
                 continue
 
             if pattern is None:
-                yield Path(path)
+                yield Path(_path)
             else:
-                if _pattern_match(path):
-                    yield Path(path)
+                if _pattern_match(_path):
+                    yield Path(_path)
         elif symlinks and entry.is_symlink():
-            yield Path(path)
+            yield Path(_path)
 
 
 def safe_reflink(src, dest):

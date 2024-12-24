@@ -35,25 +35,27 @@ from makex.errors import (
 )
 from makex.file_checksum import FileChecksum
 from makex.makex_file import (
-    InternalActionBase,
     MakexFileCycleError,
-    TargetObject,
+    TaskObject,
     find_makex_files,
+    resolve_task_output_path,
+)
+from makex.makex_file_actions import InternalActionBase
+from makex.makex_file_parser import TargetGraph
+from makex.makex_file_paths import (
     resolve_find_files,
     resolve_glob,
     resolve_path_element_workspace,
     resolve_string_path_workspace,
-    resolve_target_output_path,
 )
-from makex.makex_file_parser import TargetGraph
 from makex.makex_file_types import (
     FindFiles,
     Glob,
     ListTypes,
     PathElement,
-    PathObject,
-    ResolvedTargetReference,
-    TargetReferenceElement,
+    ResolvedTaskReference,
+    TaskPath,
+    TaskReferenceElement,
 )
 from makex.metadata_sqlite import SqliteMetadataBackend
 from makex.protocols import FileStatus
@@ -63,16 +65,16 @@ from makex.python_script import (
     StringValue,
 )
 from makex.target import (
-    EvaluatedTarget,
-    EvaluatedTargetGraph,
+    EvaluatedTask,
+    EvaluatedTaskGraph,
     InternalAction,
-    TargetKey,
-    brief_target_name,
+    TaskKey,
+    brief_task_name,
 )
 
 
 class TargetResult:
-    target: TargetObject
+    target: TaskObject
     output: str
     errors: list[Exception]
 
@@ -124,7 +126,7 @@ def figure_out_location(obj, default):
 
 # TODO: this method should be moved to the makex file module. _resolve_pathlike() fits the bill.
 def _transform_output_to_path(
-    ctx, target, base: Path, value: Union[StringValue, PathElement, PathObject]
+    ctx, target, base: Path, value: Union[StringValue, PathElement, TaskPath]
 ) -> Path:
     # TODO: we probably won't get any StringValues as they are transformed earlier
     if isinstance(value, StringValue):
@@ -132,7 +134,7 @@ def _transform_output_to_path(
     elif isinstance(value, PathElement):
         # TODO: we should use the resolved path here
         path = resolve_path_element_workspace(ctx, target.workspace, value, base)
-    elif isinstance(value, PathObject):
+    elif isinstance(value, TaskPath):
         return value.path
     else:
         raise NotImplementedError(f"Invalid output type {type(value)}: {value!r}")
@@ -140,7 +142,7 @@ def _transform_output_to_path(
     return path
 
 
-ExecuteResult = tuple[list[EvaluatedTarget], deque[Exception]]
+ExecuteResult = tuple[list[EvaluatedTask], deque[Exception]]
 
 
 class Executor:
@@ -150,7 +152,7 @@ class Executor:
     # collect errors because the way concurrent.Futures swallows them
     errors: deque[Exception]
 
-    waiting: deque[TargetObject]
+    waiting: deque[TaskObject]
 
     # will stop the loop if set
     stop: threading.Event
@@ -160,29 +162,29 @@ class Executor:
 
     # local cache/map of target hash mapping to target
     # hashes are created/store after a target has successful completion
-    _target_hash: dict[str, EvaluatedTarget]
+    _target_hash: dict[str, EvaluatedTask]
 
-    # keeps dictionary of TargetKey -> True if completed/finished
-    _target_status: dict[TargetKey, bool]
+    # keeps dictionary of TaskKey -> True if completed/finished
+    _target_status: dict[TaskKey, bool]
 
     # keep a cache of Target hashes because it's slightly expensive
-    _hash_cache: dict[TargetKey, str]
+    _hash_cache: dict[TaskKey, str]
 
     # our output (and state)
-    graph_2: EvaluatedTargetGraph
+    graph_2: EvaluatedTaskGraph
 
     # queue of object we need to write to database. doing this because of sqlite issues...
     # sqlite objects can't be accessed from a different thread, so we'd need to recreate connections per each, or,
     # keep a queue.
-    _database_queue: deque[EvaluatedTarget]
+    _database_queue: deque[EvaluatedTask]
 
     _executed_keys: set[str]
 
-    def __init__(self, ctx: "Context", workers=1, force=False, graph=None):
+    def __init__(self, ctx: "Context", workers=1, force=False, graph=None, analysis=False):
         self.ctx = ctx
         self._workers = workers
         self.force = force
-        self.analysis_mode = False
+        self.analysis_mode = analysis
 
         # our input
         self._graph_1 = graph or ctx.graph or TargetGraph()
@@ -205,11 +207,11 @@ class Executor:
 
         self._reset()
 
-    def _load_target_metadata(self, target: TargetObject) -> EvaluatedTarget:
+    def _load_target_metadata(self, target: TaskObject) -> EvaluatedTask:
         # load target information from metadata
         pass
 
-    def _are_dependencies_executed(self, check_target: ResolvedTargetReference):
+    def _are_dependencies_executed(self, check_target: ResolvedTaskReference):
         try:
             # we don't need to use the cycle checking get_requires here because they've already been loaded into the graph.
             requires = self._graph_1.get_requires(check_target)
@@ -230,7 +232,8 @@ class Executor:
 
     def _reset(self):
         self._database_queue = deque()
-        self.graph_2 = EvaluatedTargetGraph()
+        # TODO: we probably shouldn't clear the ctx here
+        self.ctx.graph_2 = self.graph_2 = EvaluatedTaskGraph()
         self.pool = ThreadPoolExecutor(self._workers)
         self.finished = []
         self.queued = deque()
@@ -258,7 +261,7 @@ class Executor:
             trace("Storing task in database %s (%s)", key, hash)
             self._disk_metadata.put_target(key, hash)
 
-    def execute_targets(self, *targets: TargetObject) -> ExecuteResult:
+    def execute_targets(self, *targets: TaskObject) -> ExecuteResult:
         """
 
         This will block/loop in a thread until all the targets are finished.
@@ -279,7 +282,7 @@ class Executor:
             if target in self.waiting:
                 continue
 
-            resolved_target = ResolvedTargetReference(
+            resolved_target = ResolvedTaskReference(
                 target.name, Path(target.makex_file_path), target.location
             )
             if len(target.requires) == 0:
@@ -339,7 +342,7 @@ class Executor:
                     debug("target queued. skip: %s", target.key())
                     continue
 
-                if isinstance(target, ResolvedTargetReference):
+                if isinstance(target, ResolvedTaskReference):
                     resolved_target = self._graph_1.get_target(target)
 
                     if resolved_target is None:
@@ -364,7 +367,7 @@ class Executor:
                         self.errors.extend(errors)
                         self.stop.set()
                 else:
-                    resolved_target = ResolvedTargetReference(
+                    resolved_target = ResolvedTaskReference(
                         target.name, Path(target.makex_file_path), target.location
                     )
                     if self._are_dependencies_executed(resolved_target):
@@ -457,7 +460,7 @@ class Executor:
             # filechecksum class handles the caching part
             return FileChecksum.is_fingerprint_valid(path) is False
 
-    def _create_output_link(self, target: EvaluatedTarget, cache: Path, fix=False):
+    def _create_output_link(self, target: EvaluatedTask, cache: Path, fix=False):
         # TODO: optimize this upwards so it isn't called for each target. or use a filesystem cache
         # link from src() / "_output_" to cache
         linkpath = target.input_path / self.ctx.output_folder_name
@@ -474,7 +477,7 @@ class Executor:
 
         if linkpath.exists():
             if not linkpath.is_symlink():
-                raise Exception(
+                raise ExecutionError(
                     f"Linkpath {linkpath} exists, but it is not a symlink. "
                     f"Output directory may have been created inadvertantly outside the tool."
                 )
@@ -487,7 +490,7 @@ class Executor:
                     linkpath.unlink()
                     linkpath.symlink_to(new_path, target_is_directory=True)
                 else:
-                    raise Exception(
+                    raise ExecutionError(
                         f"Link {linkpath} exists, but it doesn't point to the right place in the cache ({new_path}). "
                         f"The link currently points to {realpath}. "
                         f"Output directory may have been created inadvertantly outside Makex. "
@@ -531,8 +534,8 @@ class Executor:
         return status
 
     def _evaluate_target(self,
-                         target: TargetObject,
-                         destroy_output=False) -> tuple[EvaluatedTarget, list[Exception]]:
+                         target: TaskObject,
+                         destroy_output=False) -> tuple[EvaluatedTask, list[Exception]]:
         # transform the target object into an evaluated object
         # check the inputs of target are available
         seen = set()
@@ -541,11 +544,12 @@ class Executor:
         ctx = self.ctx
         #trace("Input path set to %s", target_input_path)
         inputs = []
-        requires: list[EvaluatedTarget] = []
+        # TODO: should be a set
+        requires: list[EvaluatedTask] = []
         errors = []
 
         # We may have any number of objects passed in target(requires=[]).
-        # Translate them for the EvaluatedTarget.
+        # Translate them for the EvaluatedTask.
         # XXX: there's some duplication here with _iterate_makefile_requirements
         # XXX: most of this should be duck-typed with a _evaluate() method on the Element. However,
         #  since nodes are part of the makex file scripting api, we can't just expose hidden methods on objects.
@@ -574,9 +578,7 @@ class Executor:
                     ))
             elif isinstance(node, Glob):
                 try:
-                    for path in resolve_glob(
-                        ctx, target, target_input_path, node, {ctx.output_folder_name}
-                    ):
+                    for path in resolve_glob(ctx, target, target_input_path, node):
                         checksum = self._checksum_file(path)
                         seen.add(path)
                         inputs.append(FileStatus(
@@ -600,7 +602,7 @@ class Executor:
 
                 debug("Searching for files %s: %s", path, node.pattern)
                 try:
-                    for i, file in enumerate(resolve_find_files(ctx, target, path, node.pattern, ignore_names={ctx.output_folder_name})):
+                    for i, file in enumerate(resolve_find_files(ctx, target, path, node.pattern)):
                         #trace("Checksumming input file %s", file)
                         checksum = self._checksum_file(file)
                         seen.add(file)
@@ -616,11 +618,11 @@ class Executor:
             elif isinstance(node, StringValue):
                 # XXX: This shouldn't happen. StringValues should already be transformed.
                 raise NotImplementedError(f"Got {type(node)}: {node}")
-            elif isinstance(node, TargetObject):
+            elif isinstance(node, TaskObject):
                 # XXX: reference to an internal target
                 requirement = self.graph_2.get_target(node)
                 requires.append(requirement)
-            elif isinstance(node, TargetReferenceElement):
+            elif isinstance(node, TaskReferenceElement):
                 # XXX: reference to an external target
                 # translate the target reference and resolve it
                 name = node.name
@@ -630,7 +632,7 @@ class Executor:
                 if path is None:
                     # we have a local reference
                     _path = Path(target.makex_file_path)
-                    ref = ResolvedTargetReference(name, _path, location=node.location)
+                    ref = ResolvedTaskReference(name, _path, location=node.location)
                 elif isinstance(path, StringValue):
                     _path = resolve_string_path_workspace(
                         ctx, target.workspace, path, target_input_path
@@ -648,8 +650,8 @@ class Executor:
                         #stop_and_error(error)
                         raise error
 
-                    ref = ResolvedTargetReference(name, makex_file, location=path.location)
-                elif isinstance(path, PathObject):
+                    ref = ResolvedTaskReference(name, makex_file, location=path.location)
+                elif isinstance(path, TaskPath):
                     # XXX: odd case of referring to a build_path in a target reference
                     raise NotImplementedError("")
                 elif isinstance(path, PathElement):
@@ -669,7 +671,7 @@ class Executor:
                         #stop_and_error(error)
                         raise error
 
-                    ref = ResolvedTargetReference(name, makex_file, location=path.location)
+                    ref = ResolvedTaskReference(name, makex_file, location=path.location)
                 else:
                     raise NotImplementedError(
                         f"Invalid path in Task Reference. Got {type(path)}: {path}: node={node}"
@@ -697,11 +699,11 @@ class Executor:
         }
 
         # only create if we have runs (or somehow, just outputs)
-        target_output_path, cache_path = resolve_target_output_path(ctx, target=target)
+        target_output_path, cache_path = resolve_task_output_path(ctx, target=target)
 
         if target.outputs:
             #debug("Rewrite output path %r %r %s", target_output_path, target.path, target)
-            # TODO: use a method on TargetObject to get/transform outputs
+            # TODO: use a method on TaskObject to get/transform outputs
             for k, path_like in target.outputs_dict.items():
 
                 if isinstance(path_like, list):
@@ -742,7 +744,7 @@ class Executor:
         #debug("Pre-eval requires %s", requires)
         # Create a Evaluated target early, which we can pass to Actions so they can easily create arguments (below).
         actions: list[InternalAction] = []
-        evaluated = EvaluatedTarget(
+        evaluated = EvaluatedTask(
             name=target.name,
             path=target_output_path,
             input_path=target_input_path,
@@ -806,7 +808,7 @@ class Executor:
 
     def _check_target_dirty(
         self,
-        evaluated: EvaluatedTarget,
+        evaluated: EvaluatedTask,
         h=None,
     ) -> tuple[bool, list[Exception]]:
 
@@ -924,11 +926,11 @@ class Executor:
             error("Can't find %s in %s %r", target.key(), self.queued, target)
             raise e from e
 
-    def _mark_target_complete(self, target: EvaluatedTarget):
+    def _mark_target_complete(self, target: EvaluatedTask):
         # Mark a target as complete. This is called when the target is not dirty.
         self._target_status[target.key()] = True
 
-    def _mark_target_executed(self, target: EvaluatedTarget):
+    def _mark_target_executed(self, target: EvaluatedTask):
         # Mark the target as actually executed; like, a thread was created to run it.
         if target not in self.finished:
             self.finished.append(target)
@@ -944,8 +946,8 @@ class Executor:
 
     def _execute_target(
         self,
-        target: TargetObject,
-    ) -> tuple[Optional[EvaluatedTarget], Optional[list[Exception]]]:
+        target: TaskObject,
+    ) -> tuple[Optional[EvaluatedTask], Optional[list[Exception]]]:
 
         # Don't execute any more if we have a stop flag.
         if self.stop.is_set():
@@ -1077,7 +1079,7 @@ class Executor:
         self._queue_target_on_pool(evaluated, delete_output, hash)
         return evaluated, None
 
-    def _queue_target_on_pool(self, evaluated: EvaluatedTarget, delete_output, hash) -> None:
+    def _queue_target_on_pool(self, evaluated: EvaluatedTask, delete_output, hash) -> None:
         # TODO: we should get a future here.
         #  if there was an exception, stop everything, both execution and evaluation.
         #  if all the requirements have evaluated (or no requirements), execute.
@@ -1120,7 +1122,7 @@ class Executor:
         future.add_done_callback(lambda future, x=evaluated: self._target_completed(x, future))
         return None
 
-    def _get_last_input_files(self, target: EvaluatedTarget) -> list[Path]:
+    def _get_last_input_files(self, target: EvaluatedTask) -> list[Path]:
         metadata = self._load_target_metadata(target)
         if metadata is None:
             return []
@@ -1134,7 +1136,7 @@ class Executor:
 
         return True
 
-    def _check_outputs_stale_or_missing(self, target: EvaluatedTarget, target_hash: str):
+    def _check_outputs_stale_or_missing(self, target: EvaluatedTask, target_hash: str):
         # Return True if any outputs are missing or stale
         dirty = True
         for output in target.outputs:
@@ -1164,7 +1166,7 @@ class Executor:
 
         return dirty
 
-    def _get_target_output_errors(self, target: EvaluatedTarget) -> list[Exception]:
+    def _get_target_output_errors(self, target: EvaluatedTask) -> list[Exception]:
         # Check outputs are produced after target execution.
         # return errors if they aren't, or if something else is wrong.
         if self.ctx.dry_run:
@@ -1185,7 +1187,7 @@ class Executor:
                 )
         return errors
 
-    def _get_target_hash(self, target: EvaluatedTarget):
+    def _get_target_hash(self, target: EvaluatedTask):
         key = target.key()
         hash = self._hash_cache.get(key, None)
         if hash is None:
@@ -1193,14 +1195,14 @@ class Executor:
 
         return hash
 
-    def _put_target_hash(self, target: EvaluatedTarget, hash):
+    def _put_target_hash(self, target: EvaluatedTask, hash):
         trace("Store task hash %s %s", target.key(), hash)
         self._target_hash[target.key()] = hash
 
-    def _target_completed(self, target: EvaluatedTarget, result: Future[TargetResult]):
+    def _target_completed(self, target: EvaluatedTask, result: Future[TargetResult]):
         # Called after the Future is completed.
         # Called in *this* thread (not the thread in which the target was executed).
-        assert isinstance(target, EvaluatedTarget)
+        assert isinstance(target, EvaluatedTask)
 
         self._mark_target_executed(target)
 
@@ -1233,7 +1235,7 @@ class Executor:
         # XXX: Store in database as soon as we're done with a success. No later.
         self._queue_for_database(target)
 
-    def _queue_for_database(self, target: EvaluatedTarget):
+    def _queue_for_database(self, target: EvaluatedTask):
         if self.ctx.dry_run is True:
             return None
 
@@ -1253,7 +1255,7 @@ class Executor:
         for output in outputs:
             _set_xattr(output.path, _XATTR_OUTPUT_TARGET_HASH, target_hash)
 
-    def _execute_target_thread(self, ctx: Context, target: EvaluatedTarget, target_hash):
+    def _execute_target_thread(self, ctx: Context, target: EvaluatedTask, target_hash):
         # this is run in a separate thread...
         debug(f"Begin execution of task: {target} [thread={threading.current_thread().ident}]")
 
@@ -1284,7 +1286,7 @@ class Executor:
                     # \n\n {execution.output} \n\n {execution.error}
                     string = [
                         f"Error running the action for task ",
-                        f"{brief_target_name(context, target, color=True)}:{target.location.line} (exit={execution.status}) \n",
+                        f"{brief_task_name(context, target, color=True)}:{target.location.line} (exit={execution.status}) \n",
                         f"\tThe process had an error and returned non-zero status code ({execution.status}). See above for any error output."
                     ]
                     raise ExecutionError(

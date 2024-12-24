@@ -3,7 +3,13 @@ from abc import abstractproperty
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Protocol
+from types import CodeType
+from typing import (
+    Callable,
+    Iterable,
+    Optional,
+    Protocol,
+)
 
 from makex.context import Context
 from makex.file_checksum import FileChecksum
@@ -60,9 +66,24 @@ class TargetRequirementProtocol:
         ...
 
 
-class TargetProtocol:
+class WorkspaceProtocol(Protocol):
+    # Path of the workspace, a directory.
+    path: Path
+
+    # File which this workspace was defined
+    file: Path
+
+    # short readable name [a-zA-Z_][a-zA-Z0-9\-._@]+
+    # used in workspace prefixes
+    name: str
+
+
+class TargetProtocol(Protocol):
     id: StringProtocol
 
+    name: str
+
+    workspace: WorkspaceProtocol
     # path of the target. a directory.
     path: PathProtocol
 
@@ -77,6 +98,9 @@ class TargetProtocol:
     location: FileLocationProtocol
 
     def key(self) -> str:
+        ...
+
+    def path_input(self) -> PathLike:
         ...
 
 
@@ -116,3 +140,29 @@ class StringHashFunction(Protocol):
 class HashFunctions:
     file: FileChecksumFunction
     string: StringHashFunction
+
+
+class MakexFileProtocol(Protocol):
+
+    # absolute path to the makex file
+    path: PathLike
+
+    # absolute path to the folder where the makex file is defined.
+    # TODO: rename to folder
+    directory: PathLike
+
+    targets: dict[str, TargetProtocol]
+
+    macros: dict[str, Callable]
+
+    code: Optional[CodeType] = None
+
+    includes: list["MakexFileProtocol"]
+
+    # TODO: rename to hash
+    checksum: str
+
+    environment_hash: str
+
+    def hash_components(self) -> Iterable[str]:
+        pass

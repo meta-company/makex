@@ -11,22 +11,22 @@ import pytest
 from makex.context import Context
 from makex.executor import Executor
 from makex.makex_file import (
-    InternalActionBase,
     MakexFile,
-    TargetObject,
+    TaskObject,
 )
+from makex.makex_file_actions import InternalActionBase
 from makex.makex_file_parser import TargetGraph
 from makex.makex_file_types import (
     PathElement,
-    ResolvedTargetReference,
-    TargetReferenceElement,
+    ResolvedTaskReference,
+    TaskReferenceElement,
 )
 from makex.protocols import (
     CommandOutput,
     StringHashFunction,
 )
 from makex.python_script import FileLocation
-from makex.target import EvaluatedTarget
+from makex.target import EvaluatedTask
 from makex.workspace import Workspace
 
 
@@ -61,6 +61,7 @@ class PathMaker:
 
     __call__ = path
 
+
 def test_sort(tmp_path):
     """
     diamond:
@@ -81,10 +82,10 @@ def test_sort(tmp_path):
     l = fake_location(tmp_path / "Makexfile")
 
     makex_file = MakexFile(None, tmp_path / "Makexfile")
-    d = TargetObject("d", makex_file=makex_file, location=l)
-    b = TargetObject("b", requires=[d], makex_file=makex_file, location=l)
-    c = TargetObject("c", requires=[d], makex_file=makex_file, location=l)
-    a = TargetObject("a", requires=[b, c], makex_file=makex_file, location=l)
+    d = TaskObject("d", makex_file=makex_file, location=l)
+    b = TaskObject("b", requires=[d], makex_file=makex_file, location=l)
+    c = TaskObject("c", requires=[d], makex_file=makex_file, location=l)
+    a = TaskObject("a", requires=[b, c], makex_file=makex_file, location=l)
     #errors = e.execute_targets(a)
 
     g = TargetGraph()
@@ -110,19 +111,17 @@ def test1(tmp_path):
 
     l = fake_location(tmp_path / "Makefilex")
 
-    assert TargetObject("d", location=l) == TargetObject("d", location=l)
-    assert TargetObject("a", location=l) != TargetObject("d", location=l)
+    assert TaskObject("d", location=l) == TaskObject("d", location=l)
+    assert TaskObject("a", location=l) != TaskObject("d", location=l)
 
-    assert TargetObject(
-        "d", location=l
-    ) in {TargetObject("d", location=l), TargetObject("a", location=l)}
-    assert TargetObject("d", location=l) not in {TargetObject("c", location=l)}
+    assert TaskObject("d", location=l) in {TaskObject("d", location=l), TaskObject("a", location=l)}
+    assert TaskObject("d", location=l) not in {TaskObject("c", location=l)}
 
     # force in paths so we resolve properly
-    d = TargetObject("d", path=path("d"), location=l)
-    b = TargetObject("b", path=path("b"), requires=[d], location=l)
-    c = TargetObject("c", path=path("c"), requires=[d], location=l)
-    a = TargetObject("a", path=path("a"), requires=[b, c], location=l)
+    d = TaskObject("d", path=path("d"), location=l)
+    b = TaskObject("b", path=path("b"), requires=[d], location=l)
+    c = TaskObject("c", path=path("c"), requires=[d], location=l)
+    a = TaskObject("a", path=path("a"), requires=[b, c], location=l)
 
     ctx = Context()
     ctx.workspace_object = Workspace(tmp_path)
@@ -168,10 +167,10 @@ class WriteTestAction(InternalActionBase):
     ):
         return hash_function(f"{self.path}|{self.text}")
 
-    def transform_arguments(self, ctx: Context, target: EvaluatedTarget):
+    def transform_arguments(self, ctx: Context, target: EvaluatedTask):
         pass
 
-    def run_with_arguments(self, ctx: Context, target: EvaluatedTarget, arguments) -> CommandOutput:
+    def run_with_arguments(self, ctx: Context, target: EvaluatedTask, arguments) -> CommandOutput:
         path = Path(self.path)
         if not path.is_absolute():
             path = target.path / self.path
@@ -224,7 +223,7 @@ def test_input_ouput(tmp_path: Path):
     debug("$SSSSS %s", opath())
 
     makex_file = MakexFile(None, input_make_file)
-    d = TargetObject(
+    d = TaskObject(
         "d",
         path=opath(),
         requires=[ipath("d")],
@@ -233,7 +232,7 @@ def test_input_ouput(tmp_path: Path):
         location=location,
         makex_file=makex_file,
     )
-    b = TargetObject(
+    b = TaskObject(
         "b",
         path=opath(),
         requires=[ipath("b"), d],
@@ -242,7 +241,7 @@ def test_input_ouput(tmp_path: Path):
         location=location,
         makex_file=makex_file,
     )
-    c = TargetObject(
+    c = TaskObject(
         "c",
         path=opath(),
         requires=[ipath("c"), d],
@@ -251,7 +250,7 @@ def test_input_ouput(tmp_path: Path):
         location=location,
         makex_file=makex_file,
     )
-    a = TargetObject(
+    a = TaskObject(
         "a",
         path=opath(),
         requires=[ipath("a"), b, c],
@@ -271,10 +270,10 @@ def test_input_ouput(tmp_path: Path):
 
     debug("Executed targets: %s", executed)
     l = [
-        ResolvedTargetReference("d", input_make_file),
-        ResolvedTargetReference("b", input_make_file),
-        ResolvedTargetReference("c", input_make_file),
-        ResolvedTargetReference("a", input_make_file),
+        ResolvedTaskReference("d", input_make_file),
+        ResolvedTaskReference("b", input_make_file),
+        ResolvedTaskReference("c", input_make_file),
+        ResolvedTaskReference("a", input_make_file),
     ]
     #assert l == [d, b, c, a]
     assert l[0] == d
@@ -312,9 +311,9 @@ def test2():
     
     """
 
-    f = TargetObject("f")
-    e = TargetObject("e")
-    d = TargetObject("d", requires=[f, e])
-    c = TargetObject("c", requires=[e])
-    b = TargetObject("b", requires=[d])
-    a = TargetObject("a", requires=[c])
+    f = TaskObject("f")
+    e = TaskObject("e")
+    d = TaskObject("d", requires=[f, e])
+    c = TaskObject("c", requires=[e])
+    b = TaskObject("b", requires=[d])
+    a = TaskObject("a", requires=[c])

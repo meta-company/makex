@@ -1,8 +1,13 @@
+---
+status: "Draft"
+---
 # Proposal: Generating targets
 
 Often times one needs to generate a list of targets from a list of items (such as paths).
 
-A generate() function is proposed. Generate generates targets from items, and is also a target which can be depdended on.
+Macros are a confusing (for us) way to do this currently.
+
+A generate() function is proposed. Generate generates targets from items, and is also a target which can be depended on.
 aggregate() is a another function name proposed. 
 
 TODO: runs list?  generated target run list is run after all the dependencies. 

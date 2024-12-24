@@ -2,7 +2,7 @@
 
 <!-- heading -->
 
-Makex is a new and simplified build and automation tool, similar to the original [Make](https://en.wikipedia.org/wiki/Make_(software)).
+Makex is a new and simplified build and automation tool.
 
 It __*makex*__ stuff happen. 🙂
 
@@ -12,13 +12,14 @@ It __*makex*__ stuff happen. 🙂
 ## What Makex is used for
 
 - Compiling software/applications/firmware
-- Building filesystems/trees/file archives
+- Building file systems/trees/file archives
 - Building and deploying websites and web applications
 - Running things in a repeatable manner
 - Replacing most or all of the other build systems
 
 ## Features 🍩
 
+- Task based
 - Familiar Syntax
 - File Hashing and Checksums
 - Dependency Graphs
@@ -55,7 +56,7 @@ It __*makex*__ stuff happen. 🙂
           write("hello-world.txt", "Hello World!"),
   
           # or, you can use the shell, but it's not recommended:
-          # shell(f"echo 'Hello World!' > {path('hello-world')}/hello-world.txt"),
+          # shell(f"echo 'Hello World!' > {task_path('hello-world')}/hello-world.txt"),
       ],
       outputs=[
           "hello-world.txt",
@@ -68,12 +69,8 @@ It __*makex*__ stuff happen. 🙂
   ```shell
   makex run :hello-world
   ```
- 
-```{todo}
-Use the path command to show getting an output path.
-```
 
-4. A file at `_output_/hello-world/hello-world.txt` will have the following contents:
+4. A file at `_output_/hello-world/hello-world.txt` shall have the following contents:
 
   ```
   Hello World!
@@ -92,3 +89,15 @@ This is an early release of Makex. Things may change. If you have any problems, 
 
 Makex is pronounced "makes", ˈmeɪks, ˈmeɪkˈɛks (or just "make" 🙂)
 
+## Related
+
+[Make](https://en.wikipedia.org/wiki/Make_(software))
+
+## Coming Soon
+
+- Task Self References
+- Custom Action Functions/Macros
+- Tags/Labels
+- Regular Expressions
+- Named Inputs/Outputs
+- Intellij/VSCode integration

@@ -27,9 +27,9 @@ makex run :task
    - Start pool with a queue for execution of tasks.
    - For each specified task to run:
      - Find the Task in Graph 1 and all of its dependencies.
-     - Evaluate each dependency and the task into EvaluatedTask objects.
+     - Evaluate each dependency, and the task into EvaluatedTask objects.
        - Evaluate each of the arguments, such as finds/globs.
-       - Queue them as necessary for execution (if they are dirty/stale).
+       - Queue the EvaluatedTask as necessary for execution (if they are dirty/stale).
        - Add the EvaluatedTask to Graph 2.
    - Execution Pool: While there is a queue of tasks to run/execute:
      - Execute each dependency before reaching the specified task.

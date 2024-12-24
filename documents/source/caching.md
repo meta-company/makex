@@ -21,12 +21,12 @@ Describe the Workspace id algorithm.
 
 A Task's output path may be defined by argument, otherwise it will be automatically generated.
 
-Automatically generated paths are stored into a cache with the following structure:  
+Automatically generated paths are stored into a cache with the following example structure:  
 
 - `~/.cache/makex/`: 
   - The default path to the cache. 
   - Can be controlled with the `--cache` argument to `makex`.
-  - Makex may store additional files/databases may be stored in this directory.
+  - Makex may store additional files/databases in this directory.
 - `~/.cache/makex/{workspace_id}/`: 
   - The Workspace in the cache.
 - `~/.cache/makex/{workspace_id}/_output_/{task_output_id}/`: 

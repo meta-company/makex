@@ -1,7 +1,11 @@
 # Including Makex Files
 
 ```{note}
-This is a new/experimental feature and subject to change. 
+This is a new/experimental feature and subject to change.
+ 
+The intent of this feature is to explore ideas in build systems. 
+
+This feature may be disabled or removed.
 ```
 
 Makex provides an `include()` function to include the contents of another Makex File.
@@ -66,5 +70,5 @@ parent folders up to the current workspace for the file to include.
 
 # Optional Includes
 
-Optional includes may be used to define macros and tasks which are not necessarily required.
+Optional includes may be used to define macros and tasks which are not necessarily required or private.
 

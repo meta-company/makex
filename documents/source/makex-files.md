@@ -14,13 +14,17 @@ The name of the Makex File should be one of the following:
 
 The default names to search can be changed with the {data}`makex.makex_files<TOML.makex.makex_files>` configurable.
 
+
 <!--
 The name of a file can be specified absolutely.
 
 The list of files to check can be specified on the {option}`command line<makex --makex-file-names>` or configuration file.
 --> 
 
-If several of these files exist in a directory, they will be searched in the order specified.
+If several of these files exist in a directory, they will be searched in the order specified. The first match will be used as the 
+folder's primary (or default) Makex file.
+
+The extension of makex files is `.mx`.
 
 <!-- They will be tested, in order, for a 
 magic marker to see if they are a Makex file and the first Makex-looking file will be parsed. -->
@@ -32,7 +36,10 @@ See the {ref}`differences<python-differences>` for more details.
 
 ```{tip}
 Keep your Makex Files simple. Don't be too clever. 
-Makex files are designed to evaluate quickly without necessitating the call of subprocesses.
+
+The makex file format/language is designed to be simple (simpler than python) and easy/fast to process (almost statically, if necessary).
+
+Makex files are designed to evaluate quickly without running subprocesses.
 ```
 
 
@@ -83,7 +90,8 @@ A wide range of built-in methods for {py:class}`Python strings <str>` and other 
 ```
 
 
-(actions)=
+
+(functions)=
 ```{include} syntax-functions.md
 :heading-offset: 1
 ```
@@ -93,9 +101,14 @@ A wide range of built-in methods for {py:class}`Python strings <str>` and other 
 :heading-offset: 1
 ```
 
+(environment-variables)=
+```{include} syntax-environment.md
+:heading-offset: 1
+```
+
 ## Self Documentation
 
-A multiline comment string may be included at the top of the file to document the file.
+A multiline comment string may be included at the top of the Makex file to document it.
 
 This string may be written in markdown with restructured text to provide help or description in other formats/renderings.
 
@@ -107,7 +120,7 @@ This string may be written in markdown with restructured text to provide help or
 
 - String syntax and functions are restricted.
 
-- Makex has a extra syntax for defining functions (called macros). 
+- Makex has modified syntax for defining functions (called macros). 
   Defining/using functions without a macro decorator is not allowed.
 
 - Several methods on objects such as strings and lists are not [yet] provided.
@@ -119,11 +132,11 @@ This string may be written in markdown with restructured text to provide help or
 
 ## Formatting
 
-When calling functions or constructing lists or dictionaries you should leave an extra comma at the end of the list or dictionary.
+When calling functions or constructing lists or dictionaries you should leave an trailing comma at the end of the list or dictionary.
 This helps when adding or changing values later.
 
 It is preferred to break functions/callables with keyword arguments into separate lines with a keyword argument per line.
-Actions like `execute()` or `copy()` may be left on a single line if they fit.
+Actions like `execute()` or `copy()` may be left on a single line if they fit, and may omit the trailing comma.
 
 We plan to introduce automatic formatting.
 
@@ -144,17 +157,19 @@ alist = [
 # bad 
 task(
     name="bad", requires=[
-        Task("bad"), Task("Bad")
-    ]
+        ":bad", ":Bad"
+    ],
+    ...
 )
 
 # good
 task(
     name="bad",
     requires=[
-        Task("bad"), 
-        Task("Bad"),
+        ":bad", 
+        ":Bad",
     ],
+    ...
 )
 
 ```

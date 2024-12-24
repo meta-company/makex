@@ -21,7 +21,6 @@ def _get_bool(name, default: bool = _SENTINEL, prefix="MAKEX_", environ=environ)
         return False
 
 
-
 def _get_string(name, default: bool = _SENTINEL, prefix="MAKEX_", environ=environ) -> bool:
     v = environ.get(f"{prefix}{name}", None)
     if v is None:
@@ -43,6 +42,8 @@ NESTED_WORKSPACES_ENABLED = _get_bool("NESTED_WORKSPACES_ENABLED", True)
 FIND_FUNCTION_ENABLED = _get_bool("FIND_FUNCTION_ENABLED", True)
 
 GLOB_FUNCTION_ENABLED = _get_bool("GLOB_FUNCTION_ENABLED", True)
+
+ERASE_FUNCTION_ENABLED = _get_bool("ERASE_FUNCTION_ENABLED", True)
 
 # Enable glob functions in the Target outputs list.
 GLOBS_IN_OUTPUTS_ENABLED = _get_bool("GLOBS_IN_OUTPUTS_ENABLED", True)
@@ -98,10 +99,15 @@ INCLUDE_MULTIPLE_LEVEL_ENABLED = False
 
 IMPORT_ENABLED = _get_bool("IMPORT_ENABLED", False)
 
-
 # Allow explicitly specifying the configuration file name. This will skip use of
 # the builtin file names.
 CONFIGURATION_FILE_NAME = _get_string("CONFIGURATION_FILE_NAME", None)
+
+TASK_SELF_ENABLED = _get_bool("TASK_SELF_ENABLED", True)
+
+# If true, any requirements inside of task's or a task's steps will be added to the task's requirements.
+# False so that users are explicit.
+IMPLICIT_REQUIREMENTS_ENABLED = _get_bool("IMPLICIT_REQUIREMENTS_ENABLED", False)
 
 # Strict mode
 # - Disable the shell (unless really explicit)
@@ -109,7 +115,7 @@ CONFIGURATION_FILE_NAME = _get_string("CONFIGURATION_FILE_NAME", None)
 # - Disable globs/finds
 # - Using paths of another target should be prohibited unless it is an internal (copy/sync/write).
 #   - Any paths of required targets become a dependency and would break composition.
-# - If shell must be enabled, disable __str__ on any PathObject so they can't be hidden in shell strings.
+# - If shell must be enabled, disable __str__ on any TaskPath so they can't be hidden in shell strings.
 #   - add concatenate() to explicitly concatenate [shell] strings and any paths they may require.
 STRICT_MODE = _get_bool("STRICT_MODE", False)
 
@@ -118,3 +124,4 @@ if STRICT_MODE:
     GLOB_FUNCTION_ENABLED = False
     FIND_FUNCTION_ENABLED = False
     ENABLE_PATH_TO_STRING = False
+    IMPLICIT_REQUIREMENTS_ENABLED = False

@@ -1,4 +1,8 @@
 from dataclasses import dataclass
+from enum import (
+    Enum,
+    IntEnum,
+)
 from io import StringIO
 from pathlib import Path
 from typing import (
@@ -100,3 +104,23 @@ class MissingOutputFileError(MakexError):
 class MultipleErrors(MakexError):
     def __init__(self, errors: list[Exception]):
         self.errors = errors
+
+
+class ErrorLevel(IntEnum):
+    OFF = 0
+    ERROR = 1
+    WARNING = 2
+
+
+class ErrorCategory(Enum):
+    # duplicate task in makex file
+    DUPLICATE_TASK = "Duplicate Task"
+
+    # duplicate requirement in requires list
+    DUPLICATE_REQUIREMENT = "Duplicate Requirement"
+
+    # implicit requirement was added during parsing, or for an action
+    IMPLICIT_REQUIREMENT_ADDED = "Implicit Requirement Added"
+
+    # TODO: check/warn for conflicting default makex files in the same folder.
+    MULTIPLE_DEFAULT_MAKEX_FILES = "Multiple Default Makex Files"

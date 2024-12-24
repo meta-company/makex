@@ -32,7 +32,8 @@ _shtab_makex_options=(
 
 _shtab_makex_affected_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
-  "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
+  "--scope[expand\/narrow the scope of the search. \+\/- may be added to prefix includes\/excludes.]:scope:"
+  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
   "(*):files:"
 )
 
@@ -52,7 +53,7 @@ _shtab_makex_dot_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "--files[Include\/evaluate files\/globs. May be slow.]:files:"
   "*--ignore[Specify file ignore patterns for input\/output files.]:ignore:"
-  "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
+  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
   "(*):targets:"
 )
 
@@ -65,14 +66,14 @@ _shtab_makex_evaluate_options=(
 _shtab_makex_inputs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "*--ignore[Specify file ignore patterns.]:ignore:"
-  "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
+  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
   "(*):targets:"
 )
 
 _shtab_makex_outputs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "*--ignore[Specify file ignore patterns.]:ignore:"
-  "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
+  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
   "(*):output_names:"
 )
 
@@ -87,7 +88,7 @@ _shtab_makex_run_options=(
   "--directory[Change to directory before evaluating tasks.]:directory:"
   "--force[Always run all task even if they don\'t need to be.]"
   "--dry[Do a dry run. Nothing will be executed.]"
-  "--threads[Worker threads to spawn for running\/evaluating targets in parallel. Automatically detected.]:threads:"
+  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
   "(*):tasks:_shtab_makex_complete_target"
 )
 

@@ -6,7 +6,7 @@ Workspaces use the special `//` prefix marker in paths to easily refer to tasks 
 having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
 
 Tasks can not reach out of their Workspace for dependencies (for example, using `//..`). 
-For that matter, the double dot operator is disabled entirely in Makex Paths.
+For that matter, the double dot path traversal operator is disabled entirely in Makex Paths.
 
 Usage of Workspaces is not required. 
 If the Workspace is not defined, the root of the filesystem of the current working directory will be used as the Workspace.
@@ -32,7 +32,7 @@ A `WORKSPACE` file should be left in the filesystem to mark boundaries between W
 
 ## The current Workspace
 
-The current Workspace is detected with the following order of precedence:
+The current Workspace is detected as follows, with the first match being the current Workspace:
 
 <!-- The {option}`--workspace<makex --workspace>` command line argument. -->
 
@@ -49,6 +49,9 @@ The current Workspace is detected with the following order of precedence:
 ## Referring to Tasks in a Workspace
 
 The prefix marker `//` is used to denote a Workspace path.
+
+A Task Locator takes the following form: `path:task_name`. The Path may be omitted to refer to tasks within the same Makex file
+or the task may in a Makexfile in a subfolder, or it may be an absolute path.
 
 ## Nested Workspaces
 

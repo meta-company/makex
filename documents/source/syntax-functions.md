@@ -10,7 +10,7 @@ This function defines a Task which will become part of the execution graph.
 "target" is an overloaded term in software construction (e.g "target architecture").
 ```
 
-The task function is defined as follows:
+The task function is as follows:
 
 ```{eval-rst}
 .. py:function:: task(name, requires=None, steps=None, outputs=None)
@@ -19,18 +19,19 @@ The task function is defined as follows:
   
   :param String name: Name of the task.
       
-  :param list[PathLike] requires: A list of requrements. Can be files or other tasks using a task specifier, or using the `Task` function.
-    A string with a : will be parsed as a task. Any values which evaluated to None will be skipped.
+  :param list[PathLike] requires: A list of requirements. Can be files or other tasks using a task locator or reference.
+    A string with a : will be parsed as a task reference. Any values which evaluated to None will be skipped.
   
   :param list[Union[Action,list[Action]]] steps: A list of :ref:`actions`. These are actions/task/executables/scripts run in sequence as part of the task.
   
-  :param list[PathLike] outputs: A list of the files this task outputs. If a task produces any files that are to be consumed by any dependendants of the task, they *should* be defined here. 
+  :param Union[PathLike, list[PathLike]] outputs: A file or list of the files this task outputs. 
+    If a task produces any files that are to be consumed by any dependents of the task, they *should* be defined here. 
     Defining outputs makes the task a candidate for caching.
       
 ```
 
 ```{note}
-In previous versions of Makex, this function was named `target()`; this is deprecated.
+In previous versions of Makex, this function was named `target()`; this is not supported anymore. Please rename to `task()`.
 ```
 
 ```{note}
@@ -46,21 +47,35 @@ tasks by assigning a variable with the :py:func:`path` function and passing the 
      It's absolutely unsafe.
 -->
 
-Blank example of creating a task named `name`:
+Example of creating a task named `world` which depends on `hello`:
 
 ```python
+
 task(
-    name="name",
+    name="world",
     requires=[
-        
+        ":hello"
     ],
     steps=[
-        
+        print("World!")
     ],
-    outputs=[
-        
-    ]
 )
+
+task(
+    name="hello",
+    requires=[
+    ],
+    steps=[
+        print("Hello")
+    ],
+)
+```
+
+Running the `world` task will run the `hello` task first (using `makex run :world`). The printed output will be:
+
+```
+Hello
+World!
 ```
 
 
@@ -123,12 +138,12 @@ All of these functions do the same thing.
 .. py:function:: task_path(name:String, path:PathLike=None) -> Path
   
   Returns an output path for a task with `name`. If the `path` argument is specified, returns the output path corresponding
-  to the task with the matching `name` inside `path`.  
+  to the task with the matching `name` inside of a Makex file at `path`.  
   
   The output path of a task is typically `Task.directory / "_output_" / Task.id`.
   
   :param name: Name of a task.
-  :param path: Optional. A directory containing a Makex file.
+  :param path: Optional. A folder containing a Makex file.
     Workspace relative paths are accepted here.
     
 ```
@@ -147,13 +162,14 @@ If `DIRECT_REFERENCES_TO_MAKEX_FILES` is enabled, the `path` argument may be a p
   :param path: Optional. A subpath in the home directory.
 ```
 
-
 ## find()
 
 ```{eval-rst}
 .. py:function:: find(path:PathLike, include:Union[Pattern,Glob]=None) -> list[Path]
   
-  Finds files. If path is relative, it will be resolved relative to the folder of the makex file.
+  Finds files (recursively). If path is relative, it will be resolved relative to the folder of the makex file (the source folder).
+  
+  This function is typically intended to arbitrarily find source files to operate on.
   
   Note: this function is intended to be used as part of Task or its actions; find will not return/resolve otherwise.  
   
@@ -170,9 +186,23 @@ If `DIRECT_REFERENCES_TO_MAKEX_FILES` is enabled, the `path` argument may be a p
   
   Note: this function is intended to be used as part of Task or its actions; glob will not return/resolve otherwise.  
   
+  When used alone within a task (e.g. as part of a tasks inputs/dependencies), globs will match files within the source folder
+  of the task (or, the same folder in which the makex file exists).
+  
   :param pattern: Patterns of files to include.
 ```
 
+```{tip}
 Folder/Recursive patterns: `**` (e.g. `**.py` will match python files in any directory)
-Match a file with extension `*.py`
-Match files with multiple extensions `*.{py,md,txt}`
+
+Match a file with extension: `*.py`
+
+Match files with multiple extensions: `*.{py,md,txt}`
+
+Match any single character: `?`
+
+
+.. Match a character in sequence: `[seq]`
+
+.. Match a character not in sequence: `[!seq]`
+```

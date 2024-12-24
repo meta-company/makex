@@ -1,6 +1,7 @@
 import dataclasses
 import importlib.resources
 import logging
+import operator
 import os
 import platform
 import signal
@@ -18,6 +19,7 @@ from os.path import normpath
 from pathlib import Path
 from typing import (
     Any,
+    Iterable,
     Literal,
     Optional,
     Sequence,
@@ -60,7 +62,7 @@ from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
 )
-from makex.makex_file_types import ResolvedTargetReference
+from makex.makex_file_types import ResolvedTaskReference
 from makex.python_script import (
     PythonScriptError,
     PythonScriptFileError,
@@ -69,7 +71,7 @@ from makex.run import (
     get_running_process_ids,
     run,
 )
-from makex.target import EvaluatedTargetGraph
+from makex.target import EvaluatedTaskGraph
 from makex.ui import (
     UI,
     is_ansi_tty,
@@ -97,7 +99,13 @@ class AffectedArgs(GlobalArgs):
         affected --scope //* paths or stdin
 
     """
-    pass
+
+    # list of paths that are marked as changed to find dependent tasks.
+    # paths may be relative, absolute, or workspace
+    paths: list[str]
+
+    # list of paths to change scope of makex file searches
+    scope: list[str]
 
 
 class ScopePart(Enum):
@@ -264,7 +272,7 @@ def parser(cache: Path = None, documentation: bool = True):
             #"-t",
             "--threads",
             type=int,
-            help="Worker threads to spawn for running/evaluating targets in parallel. Automatically detected.",
+            help="Worker threads to spawn for running/evaluating tasks in parallel. Automatically detected.",
             default=cpus
         )
 
@@ -275,7 +283,7 @@ def parser(cache: Path = None, documentation: bool = True):
     )
     _add_global_arguments(parser, cache, documentation)
 
-    base_parser = ArgumentParser(add_help=False)
+    base_parser = ArgumentParser(prog="makex", add_help=False)
     _add_global_arguments(base_parser, cache, documentation, help=SUPPRESS)
 
     # XXX: help argument must be specified otherwise shtab will not see the sub-commands (specifically in the zsh generator)
@@ -389,6 +397,11 @@ def parser(cache: Path = None, documentation: bool = True):
     )
     subparser.set_defaults(command_function=main_affected)
     subparser.add_argument("files", nargs="+")
+    subparser.add_argument(
+        "--scope",
+        nargs="+",
+        help="expand/narrow the scope of the search. +/- may be added to prefix includes/excludes."
+    )
 
     add_threads_argument(subparser)
 
@@ -743,7 +756,7 @@ def try_change_cwd(cwd: str):
     return cwd
 
 
-def parse_target(ctx, base, string, check=True) -> Optional[ResolvedTargetReference]:
+def parse_target(ctx, base: Path, string: str, check=True) -> Optional[ResolvedTaskReference]:
     """
     A variation of parse target which prints errors
     :param base:
@@ -755,12 +768,13 @@ def parse_target(ctx, base, string, check=True) -> Optional[ResolvedTargetRefere
     # resolve the path/makefile?:target_or_build_path name
     # return name/Path
     parts = string.split(":", 1)
+    check_upwards = False
     if len(parts) == 2:
-        path, target = parts
-        path = Path(path)
+        _path, task_name = parts
+        path = Path(_path)
 
-        if not target:
-            ctx.ui.print(f"Invalid target name {target!r} in {string!r}.", error=True)
+        if not task_name:
+            ctx.ui.print(f"Invalid target name {task_name!r} in {string!r}.", error=True)
             sys.exit(-1)
 
         if path.parts and path.parts[0] == "//":
@@ -771,8 +785,9 @@ def parse_target(ctx, base, string, check=True) -> Optional[ResolvedTargetRefere
         elif path.is_symlink():
             path = path.readlink()
     else:
-        target = parts[0]
+        task_name = parts[0]
         path = base
+        check_upwards = True
 
     #trace("Parse target %s -> %s:%s %s %s", string, target, path, parts, path.parts)
     if path.is_dir():
@@ -780,16 +795,45 @@ def parse_target(ctx, base, string, check=True) -> Optional[ResolvedTargetRefere
         # check for Build/Makexfile in path
         file = find_makex_files(path, names=ctx.makex_file_names)
         if file is None:
-            ctx.ui.print(f"Makex file does not exist for target specified: {target}", error=True)
-            for check in ctx.makex_file_names:
-                ctx.ui.print(f"- Checked in {path/check}")
-            sys.exit(-1)
-    else:
-        if DIRECT_REFERENCES_TO_MAKEX_FILES is False:
-            raise Error(f"Path to target is not a directory. Got {path}.")
-        file = path
+            if check_upwards:
+                # task path was omitted; search upwards for makex file
+                if not path.is_relative_to(ctx.workspace_path):
+                    raise Error(f"Can't run task. Current folder ({path}) is not in workspace.")
 
-    return ResolvedTargetReference(target, path=file)
+                found = None
+                for parent in [path] + list(path.parents):
+                    file = find_makex_files(parent, names=ctx.makex_file_names)
+                    if file is None:
+                        continue
+
+                    if parent == ctx.workspace_path:
+                        break
+
+                    found = file
+
+                if found is None:
+                    raise Error(f"No makex file found in {path} or parent folders.")
+
+                file = found
+
+            else:
+
+                ctx.ui.print(
+                    f"Makex file does not exist for target specified: {task_name}", error=True
+                )
+                for check in ctx.makex_file_names:
+                    ctx.ui.print(f"- Checked in {path/check}")
+                sys.exit(-1)
+    elif path.is_file():
+        if DIRECT_REFERENCES_TO_MAKEX_FILES is False:
+            raise Error(
+                f"Direct references to Makex files not permitted. Path to target is not a folder. Got {path}."
+            )
+        file = path
+    else:
+        raise NotImplementedError(f"Unknown file type {path}")
+
+    return ResolvedTaskReference(task_name, path=file)
 
 
 def main_clean(args, extra):
@@ -800,7 +844,7 @@ def main_clean(args, extra):
     """
     targets = args.targets
 
-    to_clean: list[tuple[ResolvedTargetReference, Path]] = []
+    to_clean: list[tuple[ResolvedTaskReference, Path]] = []
 
     if targets:
         for target in targets:
@@ -839,7 +883,7 @@ def main_affected(args: AffectedArgs, extra_args):
     # for the specified targets, return the reverse dependencies
     # eg. we change a project, we want to query all dependents and their dependents to rebuild them
 
-    scopes = [parse_scope(scope) for scope in args.scope or []]
+    scopes: list[ParsedScope] = [parse_scope(scope) for scope in args.scope or []]
 
     cwd = Path.cwd()
     ctx = Context()
@@ -848,24 +892,27 @@ def main_affected(args: AffectedArgs, extra_args):
 
     for scope in scopes:
         for makefile in _find_files(scope.path, names={"Makexfile"}):
-            parse_makefile_into_graph(ctx, makefile, graph)
+            result = parse_makefile_into_graph(ctx, makefile, graph)
 
-    paths = args.paths
-    if len(paths) == 1 and paths[0] == "-":
-        paths = sys.stdin.readlines
+    if len(args.paths) == 1 and args.paths[0] == "-":
+        paths = [Path(line) for line in sys.stdin.readlines()]
     else:
-        paths = args.paths
+        paths = [Path(path) for path in args.paths]
 
-    # build a EvaluatedTarget graph so we can query with absolute paths
-    g = EvaluatedTargetGraph()
+    # start an executor in analysis mode to evaluate tasks
+    executor = Executor(ctx, workers=args.threads, force=True, analysis=True)
 
-    if False:
-        for path in paths:
-            # get the targets the paths are inputs to
-            graph.get_requires_detect_cycles()
+    # evaluate all the targets we've collected into graph 2.
+    executor.execute_targets(ctx.graph.get_all_tasks())
 
-            t = graph.get_target(target)
-    raise NotImplementedError()
+    # query the evaluated task graph for the specified paths and which targets they are required by
+    graph = executor.graph_2
+    affected_tasks = list(
+        graph.get_affected(paths, scopes=list(map(operator.attrgetter("path"), scopes)))
+    )
+
+    for task in affected_tasks:
+        print(task)
 
 
 def main_get_path(args, extra):
@@ -1265,7 +1312,11 @@ def main_completions(args, extra_args):
     output = sys.stdout
     if file:
         file.parent.mkdir(parents=True, exist_ok=True)
-        output = file.open("w")
+        try:
+            output = file.open("w")
+        except PermissionError:
+            print(f"Error opening the output file. Permission denied: {file}")
+            sys.exit(-1)
 
     if args.internal is False and HAS_SHTAB is False:
         COMPLETIONS_PACKAGE = "makex.data.completions"
@@ -1358,8 +1409,6 @@ def main_run(args, extra_args):
             else:
                 ctx.ui.print(f"- //{input}:{target.name}")
 
-    #LOGGER.debug("!!!!! %r", ctx.graph.targets)
-
     # XXX: Currently set to one to avoid much breakage. Things are fast enough, for now.
     workers = 1 or args.threads
     executor = Executor(ctx, workers=workers, force=args.force)
@@ -1369,6 +1418,8 @@ def main_run(args, extra_args):
 
         if len(errors):
             print_errors(ctx, errors)
+            sys.exit(-1)
+
     except KeyboardInterrupt as e:
         executor.stop.set()
         _kill_running_processes()
@@ -1433,7 +1484,15 @@ def main():
             yappi.start()
 
     try:
-        args.command_function(args, extra_args)
+        if ":" in args.command:
+            # handle running a target with the second argument to makex
+            # e.g. makex :target
+            function = main_run
+            extra_args = args.command + extra_args
+        else:
+            function = args.command_function
+
+        function(args, extra_args)
     finally:
         if args.profile:
             if args.profile_mode == "cprofile":

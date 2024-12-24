@@ -8,7 +8,7 @@ from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
 )
-from makex.makex_file_types import ResolvedTargetReference
+from makex.makex_file_types import ResolvedTaskReference
 from makex.python_script import PythonScriptError
 from makex.workspace import Workspace
 
@@ -25,7 +25,7 @@ def test_parse(tmp_path: Path):
     graph = TargetGraph()
     result = parse_makefile_into_graph(ctx, a, graph)
     assert not result.errors
-    assert ResolvedTargetReference("a", a) in graph
+    assert ResolvedTaskReference("a", a) in graph
 
 
 def test_parse_graph(tmp_path: Path):
@@ -48,8 +48,8 @@ def test_parse_graph(tmp_path: Path):
 
     assert not result.errors
 
-    assert ResolvedTargetReference("b", b) in graph
-    assert ResolvedTargetReference("a", a) in graph
+    assert ResolvedTaskReference("b", b) in graph
+    assert ResolvedTaskReference("a", a) in graph
 
 
 def test_cycle_error_external_targets(tmp_path: Path):
@@ -154,7 +154,7 @@ def test_nested_workspaces(tmp_path: Path):
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(ctx, makefile_path_a, graph)
-    ref_a = ResolvedTargetReference("a", makefile_path_a)
+    ref_a = ResolvedTaskReference("a", makefile_path_a)
 
     a = graph.get_target(ref_a)
 
@@ -164,7 +164,7 @@ def test_nested_workspaces(tmp_path: Path):
     assert a.requires
     assert len(a.requires)
 
-    #assert a.requires == [ResolvedTargetReference("b", "//nested")]
+    #assert a.requires == [ResolvedTaskReference("b", "//nested")]
 
 
 def test_include_macros(tmp_path: Path):
@@ -186,7 +186,7 @@ def test():
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(ctx, makefile_path_a, graph)
-    ref_a = ResolvedTargetReference("test", makefile_path_a)
+    ref_a = ResolvedTaskReference("test", makefile_path_a)
 
     a = graph.get_target(ref_a)
     assert a
@@ -208,12 +208,12 @@ def test_include_targets(tmp_path: Path):
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(ctx, makefile_path_a, graph)
-    ref_a = ResolvedTargetReference("b", makefile_path_a)
+    ref_a = ResolvedTaskReference("b", makefile_path_a)
 
     a = graph.get_target(ref_a)
     assert a
 
-    ref_a = ResolvedTargetReference("a", makefile_path_a)
+    ref_a = ResolvedTaskReference("a", makefile_path_a)
     a = graph.get_target(ref_a)
 
     assert a
@@ -240,7 +240,7 @@ def test():
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(ctx, makefile_path_a, graph)
-    ref_a = ResolvedTargetReference("test", makefile_path_a)
+    ref_a = ResolvedTaskReference("test", makefile_path_a)
 
     a = graph.get_target(ref_a)
     assert a

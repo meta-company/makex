@@ -28,6 +28,7 @@ from makex._logging import (
 from makex.constants import (
     DIRECT_REFERENCES_TO_MAKEX_FILES,
     PASS_GLOBALS_TO_INCLUDE,
+    TASK_PATH_NAME_SEPARATOR,
 )
 from makex.context import Context
 from makex.errors import ExecutionError
@@ -42,19 +43,21 @@ from makex.makex_file import (
     MakexFile,
     MakexFileCycleError,
     MakexFileScriptEnvironment,
-    TargetObject,
+    TaskObject,
     find_makex_files,
+    resolve_task_output_path,
+)
+from makex.makex_file_paths import (
     resolve_path_element_workspace,
     resolve_string_path_workspace,
-    resolve_target_output_path,
 )
 from makex.makex_file_types import (
     FindFiles,
     Glob,
     PathElement,
-    PathObject,
-    ResolvedTargetReference,
-    TargetReferenceElement,
+    ResolvedTaskReference,
+    TaskPath,
+    TaskReferenceElement,
 )
 from makex.protocols import (
     FileProtocol,
@@ -65,7 +68,7 @@ from makex.python_script import (
     PythonScriptError,
     StringValue,
 )
-from makex.target import TargetKey
+from makex.target import TaskKey
 from makex.workspace import Workspace
 
 
@@ -81,40 +84,47 @@ class ParseResult:
 
 
 class TargetGraph:
-    # NOTE: We use TargetObject here because we use isinstance checks
+    # NOTE: We use TaskObject here because we use isinstance checks
+    # TODO: move this out to its own module
 
-    targets: dict[TargetKey, TargetObject]
+    targets: dict[TaskKey, TaskObject]
 
     def __init__(self) -> None:
-        # TODO: we could probably merge TargetKey and file keys and all of these dictionaries.
+        # TODO: we could probably merge TaskKey and file keys and all of these dictionaries.
 
-        # TargetKey -> object
-        self.targets: dict[TargetKey, TargetObject] = {}
+        # TaskKey -> object
+        self.targets: dict[TaskKey, TaskObject] = {}
 
-        # map of TargetKey to all of it's requirements
-        self._requires: dict[TargetKey, list[TargetObject]] = {}
+        # map of TaskKey to all of it's requirements
+        self._requires: dict[TaskKey, list[TaskObject]] = {}
 
-        # map of TargetKey to all the Files/paths it provides
-        self._provides: dict[TargetKey, list[PathLike]] = {}
+        # map of TaskKey to all the Files/paths it provides
+        self._provides: dict[TaskKey, list[PathLike]] = {}
 
-        # map from all the files inputting into TargetObject
-        self._files_to_target: dict[PathLike, set[TargetObject]] = {}
+        # map from all the files inputting into TaskObject
+        self._files_to_target: dict[PathLike, set[TaskObject]] = {}
 
-        # map from TargetKey to all the targets it provides to
-        self._provides_to: dict[TargetKey, set[TargetObject]] = {}
+        # map from TaskKey to all the targets it provides to
+        self._provides_to: dict[TaskKey, set[TaskObject]] = {}
 
-    def __contains__(self, item: ResolvedTargetReference):
+    def __contains__(self, item: ResolvedTaskReference):
         return item.key() in self.targets
 
-    def get_target(self, t) -> Optional[TargetObject]:
+    def get_all_tasks(self):
+        return self.targets.values()
+
+    def get_target(self, t: TargetProtocol) -> Optional[TaskObject]:
         #debug("Find %s in %s. key=%s", t, self.targets, t.key())
         return self.targets.get(t.key(), None)
 
-    def in_degree(self) -> Iterable[tuple[TargetObject, int]]:
+    def get_task_for_path(self, path: str, name: str) -> Optional[TaskObject]:
+        return self.targets.get(f"{path}:{name}", None)
+
+    def in_degree(self) -> Iterable[tuple[TaskObject, int]]:
         for key, target in self.targets.items():
             yield (target, len(self._provides_to.get(key, [])))
 
-    def add_targets(self, ctx: Context, *targets: TargetObject):
+    def add_targets(self, ctx: Context, *targets: TaskObject):
         assert isinstance(ctx, Context)
         assert ctx.workspace_object
 
@@ -124,8 +134,8 @@ class TargetGraph:
     def _process_target_requirements(
         self,
         ctx: Context,
-        target: TargetObject,
-    ) -> Iterable[TargetObject]:
+        target: TaskObject,
+    ) -> Iterable[TaskObject]:
 
         target_input_path = target.path_input()
         makex_file_path = Path(target.makex_file_path)
@@ -140,12 +150,12 @@ class TargetGraph:
                 # point file -> current target
                 self._files_to_target.setdefault(path, set()).add(target)
                 continue
-            elif isinstance(require, TargetObject):
+            elif isinstance(require, TaskObject):
                 # add to requires/rdeps map
                 self._provides_to.setdefault(require.key(), set()).add(target)
-                # TODO: this is for tests only. should yield a ResolvedTargetReference
+                # TODO: this is for tests only. should yield a ResolvedTaskReference
                 yield require
-            elif isinstance(require, TargetReferenceElement):
+            elif isinstance(require, TaskReferenceElement):
                 # reference to a target, either internal or outside the makex file
                 name = require.name.value
                 path = require.path
@@ -174,6 +184,14 @@ class TargetGraph:
                     # XXX: this is used for testing only. we should not be dealing with str (instead we should a StringValues)
                     location = FileLocation(None, None, target.location)
                     _path = Path(path)
+                #elif isinstance(path, str):
+                #    # XXX: this is used for testing only. we should not be dealing with str (instead we should a StringValues)
+                #    location = FileLocation(None, None, target.location)
+                #    _path = Path(path)
+            # elif isinstance(path, Path):
+            # path was constructed internally
+            #location = FileLocation(None, None, target.location)
+            #_path = path
                 else:
                     raise ExecutionError(
                         f"Invalid task reference path: Type: {type(path)} {path}",
@@ -191,14 +209,14 @@ class TargetGraph:
                         raise ExecutionError(
                             f"No makex file found at {_path}. Invalid task reference.",
                             target,
-                            path.location
+                            getattr(path, "location", None)
                         )
                 else:
                     file = _path
 
                 trace("Got reference %r %r", name, file)
-                #requirements.append(ResolvedTargetReference(name, path))
-                yield ResolvedTargetReference(name, file, location=location)
+                #requirements.append(ResolvedTaskReference(name, path))
+                yield ResolvedTaskReference(name, file, location=location)
             elif isinstance(require, (FindFiles, Glob)):
                 # These things will be resolved in a later pass.
                 # TODO: we may want to resolve these early and keep a cache.
@@ -206,10 +224,16 @@ class TargetGraph:
             else:
                 raise NotImplementedError(f"Type: {type(require)}")
 
-    def add_target(self, ctx: Context, target: TargetObject):
+    def add_target(self, ctx: Context, target: TaskObject):
         # add targetobjects during parsing
         key = target.key()
         self.targets[key] = target
+
+        # store in alternate key for finding targets inside a path without specifying a Makex file name
+        pathkey = f"{target.path_input()}:{target.name}"
+        #trace("Store altkey %s", pathkey)
+        self.targets[pathkey] = target
+
         self._requires[key] = requirements = []
 
         if target.requires:
@@ -220,7 +244,7 @@ class TargetGraph:
         self._provides[key] = provides = []
 
         #trace("Add target to graph: %r", target)
-        output_path, real_path = resolve_target_output_path(ctx, target)
+        output_path, real_path = resolve_task_output_path(ctx, target)
 
         if output_path:
             pass
@@ -229,7 +253,7 @@ class TargetGraph:
         for output in target.all_outputs():
             if isinstance(output, PathElement):
                 output = resolve_path_element_workspace(ctx, target.workspace, output, output_path)
-            elif isinstance(output, PathObject):
+            elif isinstance(output, TaskPath):
                 output = output.path
             elif isinstance(output, StringValue):
                 output = Path(output.value)
@@ -250,7 +274,7 @@ class TargetGraph:
         target: TargetProtocol,
         recursive=False,
         _seen: Optional[set] = None,
-    ) -> Iterable[TargetObject]:
+    ) -> Iterable[TaskObject]:
         # XXX: faster version of get_requires without cycle detection. used by the executor/downstream
         # query the graph for requirements in reverse order (farthest to closest)
         # TODO: we should be able to remove _seen entirely.
@@ -276,7 +300,7 @@ class TargetGraph:
         recursive=False,
         _stack: Optional[list] = None,
         _seen: Optional[set] = None
-    ) -> Iterable[TargetObject]:
+    ) -> Iterable[TaskObject]:
         # query the graph for requirements in reverse order (farthest to closest)
         _stack = list() if _stack is None else _stack
         _seen = set() if _seen is None else _seen
@@ -290,7 +314,7 @@ class TargetGraph:
         _seen.add(target)
 
         for requirement in self._requires.get(target.key(), []):
-            #requirement: TargetObject = requirement
+            #requirement: TaskObject = requirement
 
             if requirement in _seen:
                 continue
@@ -322,7 +346,7 @@ class TargetGraph:
             if recursive:
                 yield from self.get_outputs(target.requires)
 
-    def topological_sort_grouped(self: "TargetGraph", start: list[TargetObject]):
+    def topological_sort_grouped(self: "TargetGraph", start: list[TaskObject]):
         # For testing purposes.
         indegree_map = {v: d for v, d in self.in_degree() if d > 0}
         zero_indegree = [v for v, d in self.in_degree() if d == 0]
@@ -343,10 +367,10 @@ def parse_target_string_reference(
     base,
     string,
     check=True,
-) -> Optional[ResolvedTargetReference]:
+) -> Optional[ResolvedTaskReference]:
     # resolve the path/makefile?:target_or_build_path name
     # return name/Path
-    parts = string.split(":", 1)
+    parts = string.split(TASK_PATH_NAME_SEPARATOR, 1)
     if len(parts) == 2:
         path, target = parts
         path = Path(path)
@@ -371,7 +395,7 @@ def parse_target_string_reference(
                     ctx.ui.print(f"- Checked in {check}")
                 sys.exit(-1)
 
-    return ResolvedTargetReference(target, path=path)
+    return ResolvedTaskReference(target, path=path)
 
 
 def parse_makefile_into_graph(
@@ -386,7 +410,7 @@ def parse_makefile_into_graph(
     graph = graph or TargetGraph()
 
     # link from path -> path so we can detect cycles
-    linkages: dict[ResolvedTargetReference, list[ResolvedTargetReference]] = {}
+    linkages: dict[ResolvedTaskReference, list[ResolvedTaskReference]] = {}
 
     # set this event to stop the parsing loop
     stop = Event()
@@ -406,12 +430,12 @@ def parse_makefile_into_graph(
     _initial = path
     _finished: dict[Path, MakexFile] = {}
 
-    # TODO: keep a cache of included/parsed Makex files so we can include them as needed
+    # keep a cache of included/parsed Makex files so we can include them as needed
     makex_file_cache: dict[Path, MakexFile] = {}
     makex_ast_cache: dict[Path, ast.AST] = {}
     makex_module_cache: dict[Path, types.ModuleType] = {}
 
-    # TODO:keep a map of paths checked for relative path resolution so we can skip stat calls
+    # keep a map of paths checked for relative path resolution so we can skip stat calls
     # eg. we have //file.mx and //somepath/Makefile
     # we are in //somepath/Makexfile and we do include("file.mx")
     # path_check_cache[tuple("//somepath", "file.mx")] = False
@@ -428,9 +452,10 @@ def parse_makefile_into_graph(
     def _iterate_target_requires(
         makefile_path: Path,
         makefile: MakexFile,
-        target: TargetObject,
-    ) -> Iterable[ResolvedTargetReference]:
-        # yields a list of Paths the specified makefile requires
+        target: TaskObject,
+    ) -> Iterable[ResolvedTaskReference]:
+        # yields a list of tasks the specified Makex file requires
+        # converts from TaskReferenceElement to ResolvedTaskReference
         #debug("Check requires %s -> %s", target, target.requires)
         #target_input = makefile.directory
         target_input = target.path_input()
@@ -440,22 +465,22 @@ def parse_makefile_into_graph(
 
         for require in target.requires:
             trace("Process requirement %s", require)
-            if isinstance(require, TargetObject):
+            if isinstance(require, TaskObject):
                 # we have a Target object.
                 # TODO: This is used in testing. Not really important.
                 # Manually constructed target objects.
                 trace("Yield target: %s", require)
                 makex_file = require.makex_file_path
-                yield ResolvedTargetReference(
+                yield ResolvedTaskReference(
                     require.name, Path(makex_file), location=require.location
                 )
 
-            elif isinstance(require, TargetReferenceElement):
+            elif isinstance(require, TaskReferenceElement):
                 target_name = require.name
                 path = require.path
                 #debug("Got reference %s %s", name, path)
                 if isinstance(path, StringValue):
-                    # Target(name, "path/to/target")
+                    # Task(name, "path/to/target")
                     #trace("Path is string value: %r", path)
                     search_path = resolve_string_path_workspace(
                         ctx, target.workspace, path, target_input
@@ -465,7 +490,7 @@ def parse_makefile_into_graph(
                     # we could have a directory, or we could have a file
                     if search_path.is_file():
                         if allow_makex_files:
-                            yield ResolvedTargetReference(target_name, search_path, path.location)
+                            yield ResolvedTaskReference(target_name, search_path, path.location)
                             continue
                         else:
                             error = ExecutionError(
@@ -489,10 +514,10 @@ def parse_makefile_into_graph(
                         )
                         stop_and_error(error)
                         raise error
-                    yield ResolvedTargetReference(target_name, makex_file, path.location)
+                    yield ResolvedTaskReference(target_name, makex_file, path.location)
                 elif isinstance(path, PathElement):
                     # allow users to specify an absolute path to
-                    # Target(name, Path("path/to/something")))
+                    # Task(name, Path("path/to/something")))
                     search_path = resolve_path_element_workspace(
                         ctx, target.workspace, path, target_input
                     )
@@ -502,7 +527,7 @@ def parse_makefile_into_graph(
                     if search_path.is_file():
 
                         if allow_makex_files:
-                            yield ResolvedTargetReference(target_name, search_path, path.location)
+                            yield ResolvedTaskReference(target_name, search_path, path.location)
                             continue
                         else:
                             error = ExecutionError(
@@ -516,22 +541,22 @@ def parse_makefile_into_graph(
 
                     makex_file = find_makex_files(search_path, ctx.makex_file_names)
 
-                    trace("Resolved makex file from pathelement %s: %s", path, makex_file)
                     if makex_file is None:
                         error = ExecutionError(
-                            f"No makex files found in path {search_path} for the task's requirements.",
+                            f"No makex files found in path {search_path} for the task's requirements. Invalid task reference {require} @ {require.location}.",
                             target,
                             path.location
                         )
                         stop_and_error(error)
                         raise error
 
-                    yield ResolvedTargetReference(target_name, makex_file, path.location)
+                    trace("Resolved makex file from PathElement %s: %s", path, makex_file)
+                    yield ResolvedTaskReference(target_name, makex_file, path.location)
                 elif path is None:
-                    # Target(name)
+                    # Task(name)
                     # we're referring to this file. we don't need to parse anything.
                     trace(f"Reference to {target_name} doesn't have path, using {makefile_path}")
-                    yield ResolvedTargetReference(target_name, makefile_path, require.location)
+                    yield ResolvedTaskReference(target_name, makefile_path, require.location)
                 else:
                     debug("Invalid ref type %s: %r", type(path), path)
                     exc = Exception(f"Invalid reference path type {type(path)}: {path!r}")
@@ -575,7 +600,7 @@ def parse_makefile_into_graph(
                     mark_path_finished(makefile_path)
                     return
 
-                t_as_ref = ResolvedTargetReference(
+                t_as_ref = ResolvedTaskReference(
                     target.name, Path(target.makex_file_path), target.location
                 )
 
@@ -734,6 +759,7 @@ def parse_makefile_into_graph(
                     include_function=None,
                 )
             else:
+                # EXECUTE_INCLUDED_MODULE_CODE is False
                 debug("Execute code with globals %s", globals)
                 file = MakexFile.parse(
                     ctx,
@@ -743,9 +769,9 @@ def parse_makefile_into_graph(
                     include_function=None,
                 )
 
-            posix_full_path = full_path.as_posix()
+                posix_full_path = full_path.as_posix()
 
-            if EXECUTE_INCLUDED_MODULE_CODE is False:
+                # Generate a module, insert the macro functions
                 module = types.ModuleType(search_path)
                 module.__file__ = posix_full_path
                 # record the list of macros, for performance
@@ -758,7 +784,7 @@ def parse_makefile_into_graph(
             makex_file_cache[full_path] = file
 
         if EXECUTE_INCLUDED_MODULE_CODE:
-            # XXX: alternate implementation using cached code objects.
+            # XXX: alternate implementation using cached code objects and the exec() function
             #makex_file = MakexFile(ctx, Path(location.path))
             #targets = {}
             env = MakexFileScriptEnvironment(
@@ -789,6 +815,7 @@ def parse_makefile_into_graph(
             #module.__dict__.update(new_globals)
             return new_module, file
         else:
+            # duplicate the module we generated/cached
             exclude = set()
             exclude |= getattr(module, MACRO_NAMES_MODULE_VARIABLE, set())
             exclude |= set(TARGETS_MODULE_VARIABLE)
@@ -872,8 +899,7 @@ def parse_makefile_into_graph(
     def parse(ctx: Context, path: Path, workspace: Workspace):
         # We're in a parse thread...
         # TODO: keep the makex file data in memory since it's probably small.
-        # TODO: create a checksum of the file here.
-        # TODO: check the cache for an ast. if no ast in cache, create one by parsing.
+        # TODO: check the makex_file_cache for an MakexFile. if not in cache, add it by parsing.
         # TODO: the ast will be annotated with FileLocation
         """
         TODO: use the following object for caching. we need to pickle it.
@@ -910,6 +936,7 @@ def parse_makefile_into_graph(
             importer=_import,
         )
 
+    trace("Starting parsing in parent thread %s", current_thread().ident)
     pool = ThreadPoolExecutor(threads)
 
     try:
