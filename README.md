@@ -6,15 +6,16 @@ Makex is a new and simplified build and automation tool.
 
 It __*makex*__ stuff happen. 🙂
 
-<!-- features -->
+<!-- heading:end -->
 
+<!-- features -->
 
 ## What Makex is used for
 
 - Compiling software/applications/firmware
-- Building file systems/trees/file archives
+- Building file systems/trees/images/file archives
 - Building and deploying websites and web applications
-- Running things in a repeatable manner
+- Running things repeatably
 - Replacing most or all of the other build systems
 
 ## Features 🍩
@@ -27,8 +28,9 @@ It __*makex*__ stuff happen. 🙂
 - Workspaces
 - Copy on Write
 
-<!-- links -->
+<!-- features:end -->
 
+<!-- links -->
 ## Links 🔗
 
 - [Documentation](https://meta.company/go/makex)
@@ -36,8 +38,13 @@ It __*makex*__ stuff happen. 🙂
 - [Troubleshooting](https://documents.meta.company/makex/latest/trouble)
 - Support: [Google Groups](http://groups.google.com/group/makex) or [makex@googlegroups.com](mailto://makex@googlegroups.com)
 
+<!-- links:end -->
+
 <!-- quick-start -->
 
+## Requirements
+
+- Python >= 3.9
 
 ## Quick Start
 
@@ -47,7 +54,7 @@ It __*makex*__ stuff happen. 🙂
   pip install makex
   ```
 
-2. Define a Makex file (name it `Makexfile`):
+2. Define a Makex file and name it `Makexfile` ( or `makexfile` if you prefer):
 
   ```python 
   task(
@@ -55,8 +62,16 @@ It __*makex*__ stuff happen. 🙂
       steps=[
           write("hello-world.txt", "Hello World!"),
   
-          # or, you can use the shell, but it's not recommended:
-          # shell(f"echo 'Hello World!' > {task_path('hello-world')}/hello-world.txt"),
+          # or, you can use the shell, but it is not recommended:
+          # shell(f"echo 'Hello World!' > {self.path}/hello-world.txt"),
+          
+          # you may also execute things:
+          # execute("echo", "Hello World!"),
+          
+          # or just print things:
+          # print("Hello World!"),
+          
+          # more actions can go here; such as copying, mirroring or archiving...
       ],
       outputs=[
           "hello-world.txt",
@@ -64,26 +79,25 @@ It __*makex*__ stuff happen. 🙂
   )
   ```
 
-3. Run makex and the target:
+3. Run makex, specifying the task name:
 
   ```shell
   makex run :hello-world
   ```
 
-4. A file at `_output_/hello-world/hello-world.txt` shall have the following contents:
+4. A file at `$PWD/_output_/hello-world/hello-world.txt` shall have the following contents:
 
   ```
   Hello World!
   ```
+
+Read the [documentation](https://meta.company/go/makex) to learn more.
 
 ## Limitations
 
 - Mac support is not tested.
 - Windows is not tested or supported (yet).
 
-```{note}
-This is an early release of Makex. Things may change. If you have any problems, feel free to contact us. 
-```
 
 ## Pronunciation 🗣
 
@@ -91,13 +105,19 @@ Makex is pronounced "makes", ˈmeɪks, ˈmeɪkˈɛks (or just "make" 🙂)
 
 ## Related
 
-[Make](https://en.wikipedia.org/wiki/Make_(software))
+- [Make](https://en.wikipedia.org/wiki/Make_(software))
 
 ## Coming Soon
 
-- Task Self References
-- Custom Action Functions/Macros
-- Tags/Labels
+- Dynamic Task/Resource Allocation
+- Task Tags/Labels
 - Regular Expressions
-- Named Inputs/Outputs
 - Intellij/VSCode integration
+
+```{note}
+This is an early release of Makex. Things may change. Those changes will be noted in the HISTORY file (especially major ones).
+
+With that, Makex is being used extensively by us. We've created many tasks and Makex files, and we don't want to create more work. 🫡
+
+If you have any problems, feel free to contact us. 
+```

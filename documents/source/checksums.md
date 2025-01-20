@@ -7,8 +7,8 @@ Makex uses hashes (or checksums) as part of the execution process to reduce the 
 Makex will create and store hashes of a Task's input and output files, 
 and the hashes of the Makex file in which the task was defined.
 
-Each file has a `hash`, which is a digest; and a `fingerprint`, 
-which is its modification time concatenated with its size. 
+Each file Makex acts on has a `hash`, which, is a digest; and a `fingerprint`, 
+which, is its modification time concatenated with its size. 
 A hash is not valid by itself without a fingerprint.
 
 Hashes will be regenerated if no hash for the file has been generated before;

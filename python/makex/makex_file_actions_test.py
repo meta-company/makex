@@ -25,6 +25,7 @@ def makex_context(tmp_path):
     ctx.debug = True
     ctx.workspace_object = _workspace
     ctx.workspace_cache.add(_workspace)
+    ctx.cache = tmp_path / "makex_cache"
     return ctx
 
 
@@ -55,8 +56,8 @@ task(
     e = Executor(makex_context, workers=1, graph=result.graph)
     executed, errors = e.execute_targets(a)
 
-    assert executed
     assert not errors
+    assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
     assert (base / "file1").exists()
@@ -121,8 +122,8 @@ task(
     e = Executor(makex_context, workers=1, graph=result.graph)
     executed, errors = e.execute_targets(a)
 
-    assert executed
     assert not errors
+    assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
     assert (base / "file1").exists()
@@ -175,8 +176,8 @@ task(
     e = Executor(makex_context, workers=1, graph=result.graph)
     executed, errors = e.execute_targets(a)
 
-    assert executed
     assert not errors
+    assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
 
@@ -216,8 +217,8 @@ task(
     e = Executor(makex_context, workers=1, graph=graph)
     executed, errors = e.execute_targets(a)
 
-    assert executed
     assert not errors
+    assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
     assert (base / "file1").exists()
@@ -277,8 +278,8 @@ task(
     e = Executor(makex_context, workers=1, graph=graph)
     executed, errors = e.execute_targets(a)
 
-    assert executed
     assert not errors
+    assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
     assert (base / "test-1234").exists()
@@ -364,8 +365,8 @@ task(
     e = Executor(makex_context, workers=1, graph=result.graph)
     executed, errors = e.execute_targets(a)
 
-    assert executed
     assert not errors
+    assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
     assert (base / "file1").exists()
@@ -517,3 +518,89 @@ task(
     ) as f:
         print(f.getnames())
         assert f.getnames() == ["./test.txt"]
+
+
+def test_self_path_references(tmp_path, makex_context):
+    """
+    Test self.path references (and the write action).
+    """
+    makefile_path = tmp_path / "Makexfile"
+
+    file = """
+task(
+    name="test",
+    steps=[
+        write(self.path / "file1", "file1"),
+    ]
+)    
+"""
+    makefile_path.write_text(file)
+
+    graph = TargetGraph()
+
+    result = parse_makefile_into_graph(makex_context, makefile_path, graph)
+    ref_a = ResolvedTaskReference("test", makefile_path)
+
+    a = graph.get_target(ref_a)
+    assert a
+
+    e = Executor(makex_context, workers=1, graph=result.graph)
+    executed, errors = e.execute_targets(a)
+
+    assert not errors
+    assert len(executed)
+
+    base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
+    assert (base / "file1").exists()
+    assert (base / "file1").read_text() == "file1"
+
+
+def test_self_inputs_outputs_references(tmp_path, makex_context):
+    """
+    Test self.inputs and self.outputs references (and the copy action).
+    """
+    makefile_path = tmp_path / "Makexfile"
+
+    file = """
+task(
+    name="test",
+    inputs={
+        "input1": "input1.txt" 
+    },
+    steps=[
+        # test referencing a name in self.inputs and copying input to task output 
+        copy(self.inputs.input1),
+        
+        # test referencing a name in self.outputs writing to task output
+        write(self.outputs.output1, "TEST OUTPUT")
+    ],
+    outputs={
+        "output1": "output1.txt" 
+    }
+)    
+"""
+    makefile_path.write_text(file)
+
+    input_file = tmp_path / "input1.txt"
+    input_file.write_text("TEST INPUT")
+
+    graph = TargetGraph()
+
+    result = parse_makefile_into_graph(makex_context, makefile_path, graph)
+    ref_a = ResolvedTaskReference("test", makefile_path)
+
+    a = graph.get_target(ref_a)
+    assert a
+
+    e = Executor(makex_context, workers=1, graph=result.graph)
+    executed, errors = e.execute_targets(a)
+
+    assert not errors
+    assert len(executed)
+
+    base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
+    assert (base / "input1.txt").exists()
+    assert (base / "input1.txt").read_text() == "TEST INPUT"
+
+    assert (base / "output1.txt").exists()
+    assert (base / "output1.txt").read_text() == "TEST OUTPUT"

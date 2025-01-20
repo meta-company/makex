@@ -28,22 +28,26 @@ _shtab_makex_options=(
   "--debug[Enable debug and logging to the maximum level.]"
   "--color[Print colored messaging.]:color:(off auto on)"
   "--cache[The unified external cache\/build path.]:cache:"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
 )
 
 _shtab_makex_affected_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--scope[expand\/narrow the scope of the search. \+\/- may be added to prefix includes\/excludes.]:scope:"
-  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
+  "--cpus[Worker cpus to spawn for running\/evaluating tasks in parallel. (Default\: 16)]:cpus:"
   "(*):files:"
 )
 
 _shtab_makex_complete_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   ":May be a complete\/partial path. May include a target name.:"
 )
 
 _shtab_makex_completions_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--shell[]:shell:(bash zsh)"
   "--internal[]"
   ":The output file to write the completions to. If not specified, will the completion will be written to standard out.:"
@@ -51,49 +55,56 @@ _shtab_makex_completions_options=(
 
 _shtab_makex_dot_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--files[Include\/evaluate files\/globs. May be slow.]:files:"
   "*--ignore[Specify file ignore patterns for input\/output files.]:ignore:"
-  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
+  "--cpus[Worker cpus to spawn for running\/evaluating tasks in parallel. (Default\: 16)]:cpus:"
   "(*):targets:"
 )
 
 _shtab_makex_evaluate_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   ":file_or_directory:"
   ":Name of the variable to evaluate. Can be target(name).\* to evaluated variables of named targets  in the file.:"
 )
 
 _shtab_makex_inputs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "*--ignore[Specify file ignore patterns.]:ignore:"
-  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
+  "--cpus[Worker cpus to spawn for running\/evaluating tasks in parallel. (Default\: 16)]:cpus:"
   "(*):targets:"
 )
 
 _shtab_makex_outputs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "*--ignore[Specify file ignore patterns.]:ignore:"
-  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
+  "--cpus[Worker cpus to spawn for running\/evaluating tasks in parallel. (Default\: 16)]:cpus:"
   "(*):output_names:"
 )
 
 _shtab_makex_path_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--real[Return cache path. This may be slower as it must resolve Workspaces.]"
   ":Name and optional path of a task. \/\/path\:name, \/\/\:name, \:name are all valid.:"
 )
 
 _shtab_makex_run_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--directory[Change to directory before evaluating tasks.]:directory:"
   "--force[Always run all task even if they don\'t need to be.]"
   "--dry[Do a dry run. Nothing will be executed.]"
-  "--threads[Worker threads to spawn for running\/evaluating tasks in parallel. Automatically detected.]:threads:"
+  "--cpus[Worker cpus to spawn for running\/evaluating tasks in parallel. (Default\: 16)]:cpus:"
   "(*):tasks:_shtab_makex_complete_target"
 )
 
 _shtab_makex_targets_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--paths[Path to a makex file or directory]:paths:(absolute workspace relative None)"
   "--prefix[]"
   ":Path to a makex file or directory. The current directory is the default.:"
@@ -101,6 +112,7 @@ _shtab_makex_targets_options=(
 
 _shtab_makex_tasks_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   "--paths[Path to a makex file or directory]:paths:(absolute workspace relative None)"
   "--prefix[]"
   ":Path to a makex file or directory. The current directory is the default.:"
@@ -112,6 +124,7 @@ _shtab_makex_version_options=(
 
 _shtab_makex_workspace_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
+  "*--python-audit[Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.]:python_audit:"
   ":Path representing a workspace, or inside a workspace.:"
 )
 

@@ -47,9 +47,13 @@ class UI:
         self.colors = colors
         self.verbosity = verbosity or 0
 
-    def warn(self, message):
+    def warn(self, message, location: FileLocation = None):
+
+        _location = ""
+        if location:
+            _location = f"@ {location}"
         print(
-            f"{self.colors.MAKEX}[makex]{self.colors.RESET}{self.colors.WARNING}[WARNING]{self.colors.RESET}: {message}"
+            f"{self.colors.MAKEX}[makex]{self.colors.RESET}{self.colors.WARNING}[WARNING]{self.colors.RESET}: {message}{_location}"
         )
 
     def error(self, message):
@@ -119,7 +123,7 @@ def pretty_makex_file_exception(exception, location: FileLocation, colors: Color
     # TODO: remove colors from this pretty_exception
     buf = StringIO()
     buf.write(
-        f"{colors.ERROR}Error{colors.RESET} inside a Makexfile '{colors.BOLD}{location.path}{colors.RESET}:{location.line}'\n\n"
+        f"{colors.ERROR}Error{colors.RESET} inside a Makexfile: '{colors.BOLD}{location.path}{colors.RESET}:{location.line}'\n\n"
     )
 
     buf.write(f"{colors.ERROR}{exception}{colors.RESET}'\n\n")

@@ -2,8 +2,7 @@
 
 Workspaces define the roots or boundaries of projects or a repository.
 
-Workspaces use the special `//` prefix marker in paths to easily refer to tasks consistently in a workspace without 
-having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
+Workspaces use the special `//` prefix marker in paths to refer to tasks consistently in a workspace without having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
 
 Tasks can not reach out of their Workspace for dependencies (for example, using `//..`). 
 For that matter, the double dot path traversal operator is disabled entirely in Makex Paths.

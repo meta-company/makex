@@ -7,12 +7,12 @@ A configuration file is not required for basic use of Makex.
 
 The configuration file itself may be located in a number of places:
 
-- In the current working directory or its parents (as `makex.toml` or `.makex.toml`).
-- The user's configuration directory (`~/.config/makex.toml`).
-- The global/system configuration directory (`/etc/makex.toml`)
+<!-- In the current working directory or its parents (as `makex.toml` or `.makex.toml`). -->
+- The user's configuration directory (`~/.config/makex/makex.toml`).
+- The global/system configuration directory (`/etc/makex/makex.toml`)
 
 These locations are checked in order, and the configuration is merged with the same precedence.
-For example, this means that a `make.toml` in the current working directory overrides any values in the users or global.
+<!--For example, this means that a `make.toml` in the current working directory overrides any values in the users or global.-->
 
 ## Sections
 

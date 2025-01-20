@@ -37,9 +37,9 @@ from makex.flags import (
     NESTED_WORKSPACES_ENABLED,
 )
 from makex.makex_file import (
-    MACRO_NAMES_MODULE_VARIABLE,
-    MACROS_MODULE_VARIABLE,
-    TARGETS_MODULE_VARIABLE,
+    MAKEX_GLOBAL_MACRO_NAMES,
+    MAKEX_GLOBAL_MACROS,
+    MAKEX_GLOBAL_TARGETS,
     MakexFile,
     MakexFileCycleError,
     MakexFileScriptEnvironment,
@@ -65,10 +65,14 @@ from makex.protocols import (
 )
 from makex.python_script import (
     FileLocation,
+    JoinedString,
     PythonScriptError,
     StringValue,
 )
-from makex.target import TaskKey
+from makex.target import (
+    TaskKey,
+    format_hash_key,
+)
 from makex.workspace import Workspace
 
 
@@ -140,7 +144,10 @@ class TargetGraph:
         target_input_path = target.path_input()
         makex_file_path = Path(target.makex_file_path)
 
+        missing = target.missing_requirements
+
         for require in target.requires:
+
             if isinstance(require, PathElement):
                 # a simple path to a file.. declared as Path() or automatically parsed
                 # resolve the input file path
@@ -159,6 +166,7 @@ class TargetGraph:
                 # reference to a target, either internal or outside the makex file
                 name = require.name.value
                 path = require.path
+                optional = require.optional
 
                 #trace("reference input is %r: %r", require, path)
 
@@ -202,10 +210,22 @@ class TargetGraph:
                 if not _path.is_absolute():
                     _path = target_input_path / _path
 
+                task_key = format_hash_key(name, _path)
+
+                #debug("Check task (%s) in missing: %s", task_key, missing)
+                if _path.exists() is False and optional:
+                    debug("Skip adding missing optional requirement to graph %s", require)
+                    target.missing_requirements.add(task_key)
+                    continue
+
                 if _path.is_dir():
                     # find the makexfile it's referring to
                     file = find_makex_files(_path, ctx.makex_file_names)
                     if file is None:
+                        if optional:
+                            target.missing_requirements.add(task_key)
+                            continue
+
                         raise ExecutionError(
                             f"No makex file found at {_path}. Invalid task reference.",
                             target,
@@ -214,7 +234,7 @@ class TargetGraph:
                 else:
                     file = _path
 
-                trace("Got reference %r %r", name, file)
+                #trace("Got reference %r %r", name, file)
                 #requirements.append(ResolvedTaskReference(name, path))
                 yield ResolvedTaskReference(name, file, location=location)
             elif isinstance(require, (FindFiles, Glob)):
@@ -250,11 +270,16 @@ class TargetGraph:
             pass
 
         #if target.outputs:
+        # TODO: we probably don't need to store outputs in this graph.
         for output in target.all_outputs():
             if isinstance(output, PathElement):
                 output = resolve_path_element_workspace(ctx, target.workspace, output, output_path)
             elif isinstance(output, TaskPath):
                 output = output.path
+            elif isinstance(output, JoinedString):
+                # this will be resolved later
+                continue
+
             elif isinstance(output, StringValue):
                 output = Path(output.value)
 
@@ -460,16 +485,17 @@ def parse_makefile_into_graph(
         #target_input = makefile.directory
         target_input = target.path_input()
         workspace = target.workspace
+        missing = target.missing_requirements
 
         assert isinstance(workspace, Workspace)
 
         for require in target.requires:
-            trace("Process requirement %s", require)
+            #trace("Process requirement %s", require)
             if isinstance(require, TaskObject):
                 # we have a Target object.
                 # TODO: This is used in testing. Not really important.
                 # Manually constructed target objects.
-                trace("Yield target: %s", require)
+                #trace("Yield target: %s", require)
                 makex_file = require.makex_file_path
                 yield ResolvedTaskReference(
                     require.name, Path(makex_file), location=require.location
@@ -478,6 +504,8 @@ def parse_makefile_into_graph(
             elif isinstance(require, TaskReferenceElement):
                 target_name = require.name
                 path = require.path
+                optional = require.optional
+
                 #debug("Got reference %s %s", name, path)
                 if isinstance(path, StringValue):
                     # Task(name, "path/to/target")
@@ -486,7 +514,7 @@ def parse_makefile_into_graph(
                         ctx, target.workspace, path, target_input
                     )
 
-                    trace("Resolve search path from string %r: %s", path, search_path)
+                    #trace("Resolve search path from string %r: %s", path, search_path)
                     # we could have a directory, or we could have a file
                     if search_path.is_file():
                         if allow_makex_files:
@@ -504,8 +532,13 @@ def parse_makefile_into_graph(
                     #trace("Searching path for makex files: %s", search_path)
                     makex_file = find_makex_files(search_path, ctx.makex_file_names)
 
-                    trace("Resolved makex file from string %s: %s", path, makex_file)
                     if makex_file is None:
+                        if optional:
+                            key = format_hash_key(target_name, search_path)
+                            trace("Skipping missing optional requirement from parsing: %s", key)
+                            missing.add(key)
+                            continue
+
                         error = ExecutionError(
                             f"No makex files found in path {search_path} {path!r} for the task's requirements."
                             f" Tried: {ctx.makex_file_names!r} {target}",
@@ -514,6 +547,8 @@ def parse_makefile_into_graph(
                         )
                         stop_and_error(error)
                         raise error
+
+                    #trace("Resolved makex file from string %s: %s", path, makex_file)
                     yield ResolvedTaskReference(target_name, makex_file, path.location)
                 elif isinstance(path, PathElement):
                     # allow users to specify an absolute path to
@@ -521,7 +556,7 @@ def parse_makefile_into_graph(
                     search_path = resolve_path_element_workspace(
                         ctx, target.workspace, path, target_input
                     )
-                    trace("Resolve search path from %r: %s", path, search_path)
+                    #trace("Resolve search path from %r: %s", path, search_path)
 
                     # we could have a directory, or we could have a file
                     if search_path.is_file():
@@ -542,6 +577,10 @@ def parse_makefile_into_graph(
                     makex_file = find_makex_files(search_path, ctx.makex_file_names)
 
                     if makex_file is None:
+                        #if optional:
+                        #    trace("Skipping optional file requirement %s", path)
+                        #    continue
+
                         error = ExecutionError(
                             f"No makex files found in path {search_path} for the task's requirements. Invalid task reference {require} @ {require.location}.",
                             target,
@@ -550,15 +589,15 @@ def parse_makefile_into_graph(
                         stop_and_error(error)
                         raise error
 
-                    trace("Resolved makex file from PathElement %s: %s", path, makex_file)
+                    #trace("Resolved makex file from PathElement %s: %s", path, makex_file)
                     yield ResolvedTaskReference(target_name, makex_file, path.location)
                 elif path is None:
                     # Task(name)
                     # we're referring to this file. we don't need to parse anything.
-                    trace(f"Reference to {target_name} doesn't have path, using {makefile_path}")
+                    #trace(f"Reference to {target_name} doesn't have path, using {makefile_path}")
                     yield ResolvedTaskReference(target_name, makefile_path, require.location)
                 else:
-                    debug("Invalid ref type %s: %r", type(path), path)
+                    #debug("Invalid ref type %s: %r", type(path), path)
                     exc = Exception(f"Invalid reference path type {type(path)}: {path!r}")
                     stop_and_error(exc)
                     raise exc
@@ -592,7 +631,7 @@ def parse_makefile_into_graph(
 
             # we're done. add the target references to the parsing input queue
             for target_name, target in _makefile.targets.items():
-                trace("Add task to graph %s %s ", target, target.key())
+                #trace("Add task to graph %s %s ", target, target.key())
                 try:
                     graph.add_target(ctx, target)
                 except ExecutionError as e:
@@ -604,7 +643,12 @@ def parse_makefile_into_graph(
                     target.name, Path(target.makex_file_path), target.location
                 )
 
-                trace("Check requires %s -> %r", target.key(), target.requires)
+                #trace(
+                #    "Check requires %s -> %r (missing=%r)",
+                #    target.key(),
+                #    target.requires,
+                #    target.missing_requirements
+                #)
 
                 # TODO: store this iteration for later (target evaluation in Executor)
                 #  we're duplicating code there.
@@ -633,7 +677,7 @@ def parse_makefile_into_graph(
                         trace("Path already completed %s. Possible cycle.", reference)
                         continue
 
-                    trace("Add to parsing input queue %s", reference)
+                    #trace("Add to parsing input queue %s", reference)
                     input_queue.append(reference.path)
                     target.add_resolved_requirement(reference)
 
@@ -775,8 +819,8 @@ def parse_makefile_into_graph(
                 module = types.ModuleType(search_path)
                 module.__file__ = posix_full_path
                 # record the list of macros, for performance
-                setattr(module, MACROS_MODULE_VARIABLE, file.macros)
-                setattr(module, MACRO_NAMES_MODULE_VARIABLE, set(file.macros.keys()))
+                setattr(module, MAKEX_GLOBAL_MACROS, file.macros)
+                setattr(module, MAKEX_GLOBAL_MACRO_NAMES, set(file.macros.keys()))
                 # insert the macros into the synthesized modules
                 module.__dict__.update(file.macros)
                 makex_module_cache[full_path] = module
@@ -817,13 +861,13 @@ def parse_makefile_into_graph(
         else:
             # duplicate the module we generated/cached
             exclude = set()
-            exclude |= getattr(module, MACRO_NAMES_MODULE_VARIABLE, set())
-            exclude |= set(TARGETS_MODULE_VARIABLE)
+            exclude |= getattr(module, MAKEX_GLOBAL_MACRO_NAMES, set())
+            exclude |= set(MAKEX_GLOBAL_TARGETS)
             new_globals = {k: v for k, v in module.__dict__.items() if k not in exclude}
             #debug("Copy module globals %s", new_globals)
             new_module = types.ModuleType(search_path)
             new_module.__dict__.update(new_globals)
-            new_module.__dict__[TARGETS_MODULE_VARIABLE] = targets = {}
+            new_module.__dict__[MAKEX_GLOBAL_TARGETS] = targets = {}
             return new_module, file
 
     def import_function(

@@ -4,6 +4,8 @@ Makex provides a uniform filesystem based cache for all of a task's outputs.
 
 The default location of the cache is `~/.cache/makex`. The location of this cache may be configured.
 
+When makex and tasks are run, a link to the cache folder (named `_output_`) is produced next to the Makex File in which tasks are defined. This is a convenience, so that output files may be located and inspected easily.  
+
 With the correct configuration, the cache may be shared by multiple processes of makex; potentially running across different machines.
 
 ## Task Output Caching

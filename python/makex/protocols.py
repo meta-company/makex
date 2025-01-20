@@ -1,5 +1,4 @@
 import os
-from abc import abstractproperty
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import (
     Iterable,
     Optional,
     Protocol,
+    Union,
 )
 
 from makex.context import Context
@@ -16,18 +16,55 @@ from makex.file_checksum import FileChecksum
 from makex.python_script import FileLocation
 
 
-class RunArguments:
-    #targets:list[TargetReference]
-    configuration: None
+def _trim_output(output: str):
+    # prevent executable output from swamping out stdout/log
+    if output is None:
+        return ""
+
+    if len(output) > 20:
+        return output[:20] + "..."
+    return output
 
 
-@dataclass
 class CommandOutput:
-    status: int
-    output: str = None
-    error: str = None
-    hash: str = None
-    location: FileLocation = None
+    __match_args__ = ('status', 'output', 'error', 'hash', 'location')
+
+    def __init__(
+        self,
+        status: int,
+        output: str = None,
+        error: str = None,
+        hash: str = None,
+        name: str = None,
+        location: FileLocation = None
+    ) -> None:
+        self.status = status
+        self.output = output
+        self.error = error
+        self.hash = hash
+        self.location = location
+        self.name = name
+
+    def __repr__(self):
+        cls = type(self).__name__
+        return f'{cls}(status={self.status!r}, output={_trim_output(self.output)!r}, error={_trim_output(self.error)!r}, hash={self.hash!r}, location={self.location!r})'
+
+    def __eq__(self, other):
+        if not isinstance(other, CommandOutput):
+            return NotImplemented
+        return (
+            self.status,
+            self.output,
+            self.error,
+            self.hash,
+            self.location,
+        ) == (
+            other.status,
+            other.output,
+            other.error,
+            other.hash,
+            other.location,
+        )
 
 
 class CommandProtocol(Protocol):
@@ -89,7 +126,10 @@ class TargetProtocol(Protocol):
 
     requires: list[TargetRequirementProtocol]
     commands: list[CommandProtocol]
-    outputs: list[PathProtocol]
+
+    # TODO; these names/types are wrong
+    inputs: dict[Union[str, None], PathProtocol]
+    outputs: dict[Union[str, None], "FileStatus"]
 
     # which file it was defined in
     # duplicate of location?

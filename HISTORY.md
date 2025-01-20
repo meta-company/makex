@@ -1,3 +1,14 @@
+## 20250101
+
+- Add experimental support for Task self references. See the documentation/proposal.
+- Add experimental support for named inputs/outputs. See the documentation/proposal.
+- Add experimental support for optional requirements. See the documentation/proposal.
+- Add experimental support for using Paths in Globs as a pattern.
+- Enable temporary argument to control maximum CPUs used by makex (`--cpus`).
+- Remove Environment variables support and documentation for upcoming improvements to variables.
+- Add a new way to set environment variables for a task: the environment argument.
+- Deprecate the `Path()` constructor, replacing with `path()`.
+
 ## 20241201
 
 - Allow executing the outputs of another task.

@@ -25,8 +25,10 @@ DATA = """
 
 import time
 
+
 def shake128(DATA):
     return hashlib.shake_128(DATA).hexdigest(32)
+
 
 def shake256(DATA):
     return hashlib.shake_128(DATA).hexdigest(32)
@@ -36,8 +38,13 @@ def sha1(DATA):
     return hashlib.sha1(DATA).hexdigest()
 
 
+def sha256(DATA):
+    return hashlib.sha256(DATA).hexdigest()
+
+
 def md5(DATA):
     return hashlib.md5(DATA).hexdigest()
+
 
 #@pytest.mark.benchmark(
 #    group="group-name",
@@ -51,12 +58,18 @@ def md5(DATA):
 def test_bench_shake(benchmark):
     benchmark(shake128, DATA)
 
+
 def test_bench_shake256(benchmark):
     benchmark(shake256, DATA)
+
 
 def test_bench_md5(benchmark):
     benchmark(md5, DATA)
 
+
 def test_bench_sha1(benchmark):
     benchmark(sha1, DATA)
 
+
+def test_bench_sha256(benchmark):
+    benchmark(sha256, DATA)

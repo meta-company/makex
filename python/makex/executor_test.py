@@ -1,4 +1,5 @@
 import logging
+import os
 from logging import debug
 from os import PathLike
 from pathlib import Path
@@ -19,7 +20,6 @@ from makex.makex_file_parser import TargetGraph
 from makex.makex_file_types import (
     PathElement,
     ResolvedTaskReference,
-    TaskReferenceElement,
 )
 from makex.protocols import (
     CommandOutput,
@@ -60,6 +60,20 @@ class PathMaker:
         return PathElement(*path.parts, resolved=path)
 
     __call__ = path
+
+
+@pytest.fixture
+def makex_context(tmp_path):
+    # TODO: use this context in the tests
+    _workspace = Workspace(tmp_path)
+
+    ctx = Context(environment=os.environ.copy())
+    ctx.graph = TargetGraph()
+    ctx.debug = True
+    ctx.workspace_object = _workspace
+    ctx.workspace_cache.add(_workspace)
+    ctx.cache = tmp_path / "makex_cache"
+    return ctx
 
 
 def test_sort(tmp_path):
@@ -130,6 +144,8 @@ def test1(tmp_path):
 
     e = Executor(ctx, workers=2)
     errors = e.execute_targets(a)
+
+    # TODO: assert execution order is one of valid
 
     #assert False
     #assert not errors
@@ -269,6 +285,8 @@ def test_input_ouput(tmp_path: Path):
     executed, errors = e.execute_targets(a)
 
     debug("Executed targets: %s", executed)
+
+    # assert execution order is valid
     l = [
         ResolvedTaskReference("d", input_make_file),
         ResolvedTaskReference("b", input_make_file),
@@ -289,7 +307,7 @@ def test_input_ouput(tmp_path: Path):
     debug("No changes !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     executed, errors = e.execute_targets(a)
     assert not errors, f"Got {errors}"
-    assert not executed, f"Got {executed}"
+    assert len(executed) == 0, f"Tasks were executed when they shouldn't have been: {executed}"
 
     # Changing d should cause a rebuild of all
     debug("Modify D !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")

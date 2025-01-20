@@ -3,6 +3,18 @@
 
 Each task can accept a list of "Actions" that will be run when the task is executed.
 
+For example:
+
+```python
+task(
+    name="example",
+    steps=[
+        copy(...),
+        execute(...),
+        print(...),
+    ]
+)
+```
 
 ## execute()
 
@@ -52,7 +64,7 @@ Each task can accept a list of "Actions" that will be run when the task is execu
 ```{eval-rst}
 .. py:function:: copy(paths, destination=None, /)
   
-  Copy `paths` (files or folders) to the Task's output directory, or the specified directory `destination`.
+  Copy `paths` (files or folders) to the Task's output folder, or the specified folder `destination`.
   `paths` may be a list of paths or a single path.
   
   If `destination` is a relative path, it will be resolved relative to the Task's output path; this may be used to prefix items in the output.
@@ -64,7 +76,9 @@ Each task can accept a list of "Actions" that will be run when the task is execu
   
   If the destination doesn't exist, it will be created.
   
-  An Execution error will be raised if the destination exists, and it is not a directory.
+  An Execution error will be raised if the destination exists, and it is not a folder.
+  
+  The contents of folders will be copied as-is. Symbolic links shall remain unchanged.
   
   :param Union[PathLike,list[PathLike]] paths: Paths to the file(s) or folder(s) to copy. Relative paths are resolved relative to the makex file (or source folder).
   
@@ -112,7 +126,7 @@ copy(folders, folder)
 copy(file, file)
 ```
 
-
+<!--
 ## environment()
 
 
@@ -131,7 +145,6 @@ copy(file, file)
 ```
 
 
-<!--
 ## mirror()
 
 

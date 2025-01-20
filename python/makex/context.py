@@ -7,6 +7,7 @@ from dataclasses import (
 )
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Callable,
     Pattern,
 )
@@ -46,6 +47,10 @@ if BUILT_IN_REFLINKS:
 else:
     import file_cloning
 
+if TYPE_CHECKING:
+    from makex.makex_file_parser import TargetGraph
+    from makex.target import EvaluatedTaskGraph
+
 
 @dataclass
 class Context:
@@ -63,9 +68,9 @@ class Context:
     # graph is used everywhere so it is attached to context
     # TODO: rename as we need two graphs (graph1 and graph2).
     # TODO: this doesn't really need to be in this Context object
-    graph: "makex.makex_file_parser.TargetGraph" = None
+    graph: "TargetGraph" = None
 
-    graph_2: "makex.target.EvaluatedTaskGraph" = None
+    graph_2: "EvaluatedTaskGraph" = None
 
     # platform query is used everywhere
     platform: PlatformObject = None
@@ -143,6 +148,8 @@ class Context:
         ErrorCategory.IMPLICIT_REQUIREMENT_ADDED: ErrorLevel.WARNING,
         ErrorCategory.DUPLICATE_TASK: ErrorLevel.ERROR,
     }
+
+    cpus: int = 1
 
     @property
     def workspace_path(self):

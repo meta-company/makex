@@ -1,11 +1,11 @@
 (tasks-as-executables)=
-# Tasks as Executables
+# Tasks as Executables (Example)
 
 Say, for example, you need to build a compiler/code generator to build another part of your source code.
 
-We shall use two separate makex files to demonstrate this pattern.
+We shall use two separate Makex files to demonstrate this pattern.
 
-The first makex file defines a compiler tool and how to build it (`//tools/makexfile`):
+The first Makex file defines a compiler tool and how to build it (`//tools/makexfile`):
 
 ```python
 task(
@@ -18,7 +18,7 @@ task(
 )
 ```
 
-The second makex file uses the compiler tool as part of its build process (`//project1/makexfile`):
+The second Makex file uses the compiler tool as part of its build process (`//project1/makexfile`):
 
 ```python
 task(
@@ -36,7 +36,7 @@ The `compiler-binary` will be used in the `//project1:build` Task to translate a
 Since `compiler-binary` is the only output of `//tools:compiler` task, it shall be unambiguously used as the binary. 
 
 ```{note}
-In a future implementation of makex, a task may produce multiple [named] outputs, and one of outputs may be selected as executable 
+In a future implementation of Makex, a task may produce multiple [named] outputs, and one of outputs may be selected as executable 
 (in the cases of large compiler toolkits, such as clang).
 
 We're also exploring a concept we're calling `first-class executables`.

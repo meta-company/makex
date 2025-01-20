@@ -15,6 +15,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from ast import fix_missing_locations
 from collections import deque
 from copy import copy
 from dataclasses import (
@@ -33,6 +34,14 @@ from typing import (
     Union,
 )
 
+# PERFORMANCE: import names directly from the ast module so we don't need to do module lookup
+ast_Call = ast.Call
+ast_Name = ast.Name
+ast_Constant = ast.Constant
+ast_Load = ast.Load
+ast_keyword = ast.keyword
+ast_Attribute = ast.Attribute
+
 LOGGER = logging.getLogger("python-script")
 STRING_VALUE_NAME = "_STRING_"
 JOINED_STRING_VALUE_NAME = "_JOINED_STRING_"
@@ -41,6 +50,15 @@ GLOBALS_NAME = "_GLOBALS_"
 FILE_LOCATION_NAME = "_LOCATION_"
 FILE_LOCATION_ARGUMENT_NAME = "_location_"
 FILE_LOCATION_ATTRIBUTE = "location"
+
+# set of names to ignore
+IGNORE_NAMES = {
+    STRING_VALUE_NAME,
+    FILE_LOCATION_NAME,
+    LIST_VALUE_NAME,
+    GLOBALS_NAME,
+    JOINED_STRING_VALUE_NAME,
+}
 
 
 class FileLocation:
@@ -80,7 +98,14 @@ class FileLocation:
 _SENTINEL = object()
 
 
-def get_location(object, default=_SENTINEL) -> Optional[FileLocation]:
+class HasLocation(Protocol):
+    """
+    A standard protocol nodes should implement, so they may be located (by get_location()).
+    """
+    location: FileLocation
+
+
+def get_location(object: HasLocation, default=_SENTINEL) -> Optional[FileLocation]:
     # Return a FileLocation from an object in a python script.
     if default is _SENTINEL:
         return getattr(object, FILE_LOCATION_ATTRIBUTE)
@@ -88,20 +113,20 @@ def get_location(object, default=_SENTINEL) -> Optional[FileLocation]:
 
 
 def is_function_call(node: ast.Call, name: str):
-    if isinstance(node, ast.Call) is False:
+    if isinstance(node, ast_Call) is False:
         return False
 
-    if isinstance(node.func, ast.Name) and node.func.id == name:
+    if isinstance(node.func, ast_Name) and node.func.id == name:
         return True
 
     return False
 
 
 def call_function(name, line, column, args=None, keywords=None):
-    call = ast.Call(
-        func=ast.Name(
+    call = ast_Call(
+        func=ast_Name(
             id=name,
-            ctx=ast.Load(),
+            ctx=ast_Load(),
             lineno=line,
             col_offset=column,
         ),
@@ -192,11 +217,11 @@ class PythonScriptFileSyntaxError(PythonScriptFileError):
         super().__init__(wraps, path, location)
 
 
-def wrap_script_function(f):
+def wrap_script_function(f, **extra):
     # wraps a script function to have a location= keyword argument instead of our special hidden one
     def wrapper(*args, **kwargs):
         location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME)
-        return f(*args, **kwargs, location=location)
+        return f(*args, **kwargs, **extra, location=location)
 
     return wrapper
 
@@ -217,8 +242,8 @@ class StringValue(str):
 
     def __init__(self, data, location=None):
         super().__init__()
-        self.value = data
-        self.location = location
+        self.value: str = data
+        self.location: FileLocation = location
 
     def replace(self, *args, _location_=None) -> "StringValue":
         return StringValue(self.value.replace(*args), location=_location_)
@@ -252,20 +277,93 @@ class JoinedString:
     """
     __slots__ = ["parts", "location"]
 
-    def __init__(self, parts, location=None):
-        self.parts = parts
+    def __init__(self, *parts, location=None):
+        self.parts: list[Any] = parts
+        self.location: FileLocation = location
+
+    #def evaluate(self, data=None) -> StringValue:
+    #    # use the variables/functions in data to evaluate the string parts
+    #    return StringValue("".join(self._evaluate(data)), location=self.location)
+    #def _evaluate(self, data):
+    #    for part in self.parts:
+    #        if eval_func := getattr(part, "evaluate", None):
+    #            yield eval_func(data)
+    #        else:
+    #            yield part
+
+
+class IntegerValue:
+    # XXX: subtypes of int can't have slots. (TypeError: nonempty __slots__ not supported for subtype of 'int')
+    __slots__ = ("value", "location")
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls, args[0])
+
+    def __init__(self, value, location: FileLocation):
+        self.value: int = value
+        self.location: FileLocation = location
+
+    def __int__(self):
+        return self.value
+
+    def __index__(self):
+        return self.value
+
+    def __add__(self, other):
+        if isinstance(other, IntegerValue) is False:
+            raise RuntimeError(f"Can't add {self!r} with {type(other)}.")
+        return IntegerValue(self.value + other.value, other.location)
+
+    def __iadd__(self, other):
+        if isinstance(other, IntegerValue) is False:
+            raise RuntimeError(f"Can't add {type(other)} to {self!r}.")
+        self.value += other.value
+        return self
+
+    def __sub__(self, other):
+        # self - other
+        if isinstance(other, IntegerValue) is False:
+            raise RuntimeError(f"Can't subtract {type(other)} from {self!r}.")
+        return IntegerValue(self.value - other.value, other.location)
+
+    def __isub__(self, other):
+        # self -= other
+        if isinstance(other, IntegerValue) is False:
+            raise RuntimeError(f"Can't subtract {self!r} with {type(other)}.")
+
+        self.value -= other.value
+        return self
+
+    def __mul__(self, other):
+        # self * other
+        if isinstance(other, IntegerValue) is False:
+            raise RuntimeError(f"Can't multiply {self!r} with {type(other)}.")
+        return IntegerValue(self.value * other.value, other.location)
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return 'IntegerValue(%s)' % self.value
+
+
+class BooleanValue:
+    __slots__ = ("value", "location")
+
+    def __init__(self, value: bool, location: FileLocation):
+        self.value: bool = value
+        self.location: FileLocation = location
+
+    def __bool__(self):
+        return self.value
+
+    def __repr__(self):
+        return 'BooleanValue(%s)' % self.value
+
+
+class NoneValue:
+    def __init__(self, location: FileLocation):
         self.location = location
-
-    def evaluate(self, data=None) -> StringValue:
-        # use the variables/functions in data to evaluate the string parts
-        return StringValue("".join(self._evaluate(data)), location=self.location)
-
-    def _evaluate(self, data):
-        for part in self.parts:
-            if eval_func := getattr(part, "evaluate", None):
-                yield eval_func(data)
-            else:
-                yield part
 
 
 class _DisableImports(ast.NodeVisitor):
@@ -293,17 +391,17 @@ class _DisableImports(ast.NodeVisitor):
 
 
 def create_file_location_call(path, line, column):
-    file_location_call = ast.Call(
-        func=ast.Name(
+    file_location_call = ast_Call(
+        func=ast_Name(
             id=FILE_LOCATION_NAME,
-            ctx=ast.Load(lineno=line, col_offset=column),
+            ctx=ast_Load(lineno=line, col_offset=column),
             lineno=line,
             col_offset=column
         ),
         args=[
-            ast.Constant(line, lineno=line, col_offset=column),
-            ast.Constant(column, lineno=line, col_offset=column),
-            ast.Constant(path, lineno=line, col_offset=column),
+            ast_Constant(line, lineno=line, col_offset=column),
+            ast_Constant(column, lineno=line, col_offset=column),
+            ast_Constant(path, lineno=line, col_offset=column),
         ],
         keywords=[],
         lineno=line,
@@ -315,7 +413,7 @@ def create_file_location_call(path, line, column):
 def add_location_keyword_argument(node: ast.Call, path, line, column):
     file_location = create_file_location_call(path, line, column)
     node.keywords.append(
-        ast.keyword(
+        ast_keyword(
             arg=FILE_LOCATION_ARGUMENT_NAME,
             value=file_location,
             lineno=line,
@@ -350,21 +448,21 @@ class _DisableAssignments(ast.NodeVisitor):
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> Any:
         # (walrus)
-        if isinstance(node.target, ast.Name):
+        if isinstance(node.target, ast_Name):
             self.check_name(node, node.target.id)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
         #AnnAssign; assignments with type expressions
-        if isinstance(node.target, ast.Name):
+        if isinstance(node.target, ast_Name):
             self.check_name(node, node.target.id)
 
     def visit_Assign(self, node: ast.Assign) -> Any:
         for target in node.targets:
-            if isinstance(target, ast.Name):
+            if isinstance(target, ast_Name):
                 self.check_name(node, target.id)
             elif isinstance(target, ast.Tuple):
                 for element in target.elts:
-                    if isinstance(element, ast.Name):
+                    if isinstance(element, ast_Name):
                         self.check_name(element, element.id)
         """
          the following expression can appear in assignment context
@@ -387,8 +485,13 @@ class _TransformStringValues(ast.NodeTransformer):
         self.path = path
         self.late_joined = late_joined
 
+        if self.late_joined is False:
+            self.visit_JoinedStr = self.visit_JoinedStr1
+        else:
+            self.visit_JoinedStr = self.visit_JoinedStr2
+
     def visit_Call(self, node: ast.Call) -> Any:
-        if node.func and isinstance(node.func, ast.Name) and node.func.id == FILE_LOCATION_NAME:
+        if node.func and isinstance(node.func, ast_Name) and node.func.id == FILE_LOCATION_NAME:
             # Don't step on the FileLocation() adding pass.
             # return the node and don't process the FileLocation children.
             return node
@@ -401,21 +504,19 @@ class _TransformStringValues(ast.NodeTransformer):
             offset = node.col_offset
 
             #logging.debug("Got string cnst %s %s", node.value, node.lineno)
-            file_location = create_file_location_call(self.path, line, offset)
-
             # TODO: separate the values into JoinedString class so we can evaluate later.
-            strcall = ast.Call(
-                func=ast.Name(
+            strcall = ast_Call(
+                func=ast_Name(
                     id=STRING_VALUE_NAME,
-                    ctx=ast.Load(),
+                    ctx=ast_Load(),
                     lineno=line,
                     col_offset=offset,
                 ),
                 args=[node],
                 keywords=[
-                    ast.keyword(
+                    ast_keyword(
                         arg='location',
-                        value=file_location,
+                        value=create_file_location_call(self.path, line, offset),
                         lineno=line,
                         col_offset=offset,
                     ),
@@ -425,39 +526,59 @@ class _TransformStringValues(ast.NodeTransformer):
             )
             return strcall
         else:
+            # TODO: transform whatever constant here into the appropriate type (e.g. NoneValue, BoolValue,FloatValue)
             #logging.debug("Got other const %r", node.value)
             return node
 
-    def visit_JoinedStr(self, node: ast.JoinedStr) -> Any:
+    def visit_JoinedStr1(self, node: ast.JoinedStr) -> Any:
         line = node.lineno
         offset = node.col_offset
 
-        file_location = create_file_location_call(self.path, line, offset)
-
-        if self.late_joined:
-            # TODO: separate the values into JoinedString class so we can evaluate later.
-            strcall = ast.Call(
-                func=ast.Name(id=JOINED_STRING_VALUE_NAME, ctx=ast.Load()),
-                args=node.values,
-                keywords=[
-                    ast.keyword(arg='location', value=file_location),
-                ],
-                lineno=line,
-                col_offset=offset,
-            )
-        else:
-            strcall = ast.Call(
-                func=ast.Name(id=STRING_VALUE_NAME, ctx=ast.Load()),
-                args=[node],
-                keywords=[
-                    ast.keyword(arg='location', value=file_location),
-                ],
-                lineno=line,
-                col_offset=offset,
-            )
+        # Wrap the entire JoinedStr into a StringValue()
+        strcall = ast_Call(
+            func=ast_Name(id=STRING_VALUE_NAME, ctx=ast_Load()),
+            args=[node],
+            keywords=[
+                ast_keyword(
+                    arg='location',
+                    value=create_file_location_call(self.path, line, offset),
+                ),
+            ],
+            lineno=line,
+            col_offset=offset,
+        )
         self.generic_visit(node)
 
-        ast.fix_missing_locations(strcall)
+        fix_missing_locations(strcall)
+        return strcall
+
+    def visit_JoinedStr2(self, node: ast.JoinedStr) -> Any:
+        line = node.lineno
+        offset = node.col_offset
+
+        self.generic_visit(node)
+
+        # separate the values into JoinedString class, so we can evaluate the parts later.
+        values = []
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                values.append(value.value)
+            else:
+                values.append(value)
+
+        strcall = ast_Call(
+            func=ast_Name(id=JOINED_STRING_VALUE_NAME, ctx=ast_Load()),
+            args=values,
+            keywords=[
+                ast_keyword(
+                    arg='location',
+                    value=create_file_location_call(self.path, line, offset),
+                ),
+            ],
+            lineno=line,
+            col_offset=offset,
+        )
+        fix_missing_locations(strcall)
         return strcall
 
     # XXX: Deprecated in 3.8 and unused past that version.
@@ -467,18 +588,20 @@ class _TransformStringValues(ast.NodeTransformer):
         line = node.lineno
         offset = node.col_offset
 
-        file_location = create_file_location_call(self.path, line, offset)
-        strcall = ast.Call(
-            func=ast.Name(id=STRING_VALUE_NAME, ctx=ast.Load()),
+        strcall = ast_Call(
+            func=ast_Name(id=STRING_VALUE_NAME, ctx=ast_Load()),
             args=[ast.Str(node.s)],
             keywords=[
-                ast.keyword(arg='location', value=file_location),
+                ast_keyword(
+                    arg='location',
+                    value=create_file_location_call(self.path, line, offset),
+                ),
             ],
             lineno=line,
             col_offset=offset,
         )
 
-        ast.fix_missing_locations(strcall)
+        fix_missing_locations(strcall)
         return strcall
 
 
@@ -500,16 +623,16 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
         #debug(f"#Transform fileloction {node.func} {type(node.func)} {node.func.ctx} {type(node.func.ctx)}")
         func = node.func
 
-        if isinstance(func, ast.Attribute):
+        if isinstance(func, ast_Attribute):
             attr_name = func.attr
             attr_of = func.value
-            if not (isinstance(attr_of, ast.Name) and isinstance(attr_of.ctx, ast.Load)):
+            if not (isinstance(attr_of, ast_Name) and isinstance(attr_of.ctx, ast_Load)):
                 # could/probably have a str.method e.g. "".join()
                 #for child in ast.iter_child_nodes(node):
                 #    self.generic_visit(child)
                 self.generic_visit(node)
                 return node
-        elif isinstance(func, ast.Name):
+        elif isinstance(func, ast_Name):
             function_name = func.id
 
             # XXX: Ignore specific names we need to handle specially; like StringValue and FileLocation.
@@ -527,9 +650,9 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
         #debug(f">Transform fileloction {node.func.id}")
         file_location = create_file_location_call(self.path, node.lineno, node.col_offset)
         node.keywords = node.keywords or []
-        node.keywords.append(ast.keyword(arg=FILE_LOCATION_ARGUMENT_NAME, value=file_location))
+        node.keywords.append(ast_keyword(arg=FILE_LOCATION_ARGUMENT_NAME, value=file_location))
 
-        ast.fix_missing_locations(node)
+        fix_missing_locations(node)
         return node
 
 
@@ -545,7 +668,7 @@ class ListValue:
 
     __slots__ = ["initial_value", "location", "appended_values"]
 
-    def __init__(self, value, _location_: FileLocation):
+    def __init__(self, value: list, _location_: FileLocation):
         assert isinstance(value, list)
         self.initial_value = value
         self.appended_values = deque()
@@ -564,17 +687,11 @@ class ListValue:
     def __radd__(self, other):
         if isinstance(other, list):
             self.appended_values.extendleft(other)
-        #elif isinstance(other, GlobValue):
-        #    for i in other:
-        #        self.appended_values.insert(0, i)
-        #    self.prepended_values.extend(other._pieces)
-        #    self.appended_values.appendleft(other)
-        #elif isinstance(other, StringValue):
-        #    self.appended_values.appendleft(other)
         elif isinstance(other, ListValue):
             self.appended_values.appendleft(*other.appended_values)
             #self.prepended_values.extend(other.appended_values)
         else:
+            #self.appended_values.appendleft(other)
             raise Exception(f"Cant add {other}{type(other)} to {self}")
         return self
 
@@ -624,14 +741,13 @@ class _TransformListValues(ast.NodeTransformer):
         line = node.lineno
         offset = node.col_offset
 
-        file_location = create_file_location_call(self.path, line, offset)
-        _node = ast.Call(
-            func=ast.Name(id=LIST_VALUE_NAME, ctx=ast.Load(), lineno=line, col_offset=offset),
+        _node = ast_Call(
+            func=ast_Name(id=LIST_VALUE_NAME, ctx=ast_Load(), lineno=line, col_offset=offset),
             args=[node],
             keywords=[
-                ast.keyword(
+                ast_keyword(
                     arg=FILE_LOCATION_ARGUMENT_NAME,
-                    value=file_location,
+                    value=create_file_location_call(self.path, line, offset),
                     lineno=line,
                     col_offset=offset
                 )
@@ -659,36 +775,33 @@ class PythonScriptFile:
         imports_enabled: bool = False
         import_function: Optional[Callable] = None
         disable_assigment_names: set = field(default_factory=set)
-        late_joined_string = False
-        transform_lists = True
+        late_joined_string: bool = False
+        transform_lists: bool = True
 
         # False: none
         # True: Use default
-        builtins = False
+        builtins: bool = False
+
+    extra_visitors = None
+    pre_visitors = None
+    importer = None
+    enable_imports = False
+    disable_assigment_names = set()
+    late_joined_string = False
 
     def __init__(
         self,
         path: PathLike,
         globals: Optional[Globals] = None,
-        # TODO: split these into a options class
-        importer=None,
-        pre_visitors=None,
-        extra_visitors=None,
-        enable_imports=False,
         options=None,
     ):
         self.path = str(path)
         self.globals = globals or {}
-        self.disable_assignment_names = set()
-        self.extra_visitors = extra_visitors or []
-        self.pre_visitors = pre_visitors or []
-        self.enable_imports = enable_imports
-        self.importer = importer or self._importer
         self.options = options
         if options:
             self.extra_visitors = options.post_visitors
             self.pre_visitors = options.pre_visitors
-            self.importer = options.import_function
+            self.importer = options.import_function or self._importer
             self.enable_imports = options.imports_enabled
             self.disable_assignment_names = options.disable_assigment_names
             self.late_joined_string = options.late_joined_string
@@ -721,9 +834,6 @@ class PythonScriptFile:
         return tree
 
     def _parse(self, tree: ast.AST):
-        # set of names to ignore
-        ignore = {STRING_VALUE_NAME, FILE_LOCATION_NAME, LIST_VALUE_NAME, GLOBALS_NAME}
-
         # Catch some early errors
         # TODO: enable this once we have options
         if False:
@@ -737,11 +847,11 @@ class PythonScriptFile:
             visitor.visit(tree)
 
         # XXX: calls should be transformed first
-        t = _TransformCallsToHaveFileLocation(ignore, self.path)
+        t = _TransformCallsToHaveFileLocation(IGNORE_NAMES, self.path)
         t.visit(tree)
 
         # XXX: string values and primitives should be transformed next
-        t = _TransformStringValues(self.path)
+        t = _TransformStringValues(self.path, late_joined=self.late_joined_string)
         t.visit(tree)
 
         t = _TransformListValues(self.path)
@@ -773,6 +883,7 @@ class PythonScriptFile:
         scope[FILE_LOCATION_NAME] = FileLocation
         scope[LIST_VALUE_NAME] = ListValue
         scope[GLOBALS_NAME] = globals
+        scope[JOINED_STRING_VALUE_NAME] = JoinedString
 
         try:
             code = compile(tree, self.path, 'exec')

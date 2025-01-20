@@ -24,6 +24,7 @@ from makex.errors import (
     GenericSyntaxError,
     MakexError,
 )
+from makex.flags import READ_CONFIG_FROM_PARENTS
 
 _HAS_TOML = False
 try:
@@ -35,7 +36,6 @@ except ImportError:
         _HAS_TOML = True
     except ImportError:
         _HAS_TOML = False
-
 
 
 class ConfigurationError(MakexError):
@@ -154,15 +154,14 @@ class Configuration:
 
     def to_json(self):
         return {
-            "makex":
-                {
-                    "workspace": self.workspace,
-                    "cache_root": self.cache_root,
-                    "shell": self.shell,
-                    "file_names": self.file_names,
-                    "exclude": self.exclude,
-                    "reflinks": self.reflinks,
-                }
+            "makex": {
+                "workspace": self.workspace,
+                "cache_root": self.cache_root,
+                "shell": self.shell,
+                "file_names": self.file_names,
+                "exclude": self.exclude,
+                "reflinks": self.reflinks,
+            }
         }
 
 
@@ -296,13 +295,11 @@ def collect_configurations(
         parent = cwd
         while parent and parent.name:
             workspace_file = parent / WORKSPACE_FILE_NAME
-            config_file1 = parent / CONFIG_NAME_1
-            config_file2 = parent / CONFIG_NAME_2
 
             if workspace_file.exists():
                 workspace_files_found.append(workspace_file)
 
-            if False:
+            if False and __debug__:
                 for config_file_type, config_file_name in CONFIG_FILE_NAMES:
                     path = parent / config_file_name
 
@@ -316,16 +313,19 @@ def collect_configurations(
                     else:
                         raise NotImplementedError
 
-            if config_file1.exists():
-                verbose(f"Reading configuration file at {config_file1}")
-                config_files_found.append(read_configuration(config_file1))
-            elif config_file2.exists():
-                verbose(f"Reading configuration file at {config_file2}")
-                config_files_found.append(read_configuration(config_file2))
+            if READ_CONFIG_FROM_PARENTS:
+                config_file1 = parent / CONFIG_NAME_1
+                config_file2 = parent / CONFIG_NAME_2
+                if config_file1.exists():
+                    verbose(f"Reading configuration file at {config_file1}")
+                    config_files_found.append(read_configuration(config_file1))
+                elif config_file2.exists():
+                    verbose(f"Reading configuration file at {config_file2}")
+                    config_files_found.append(read_configuration(config_file2))
             parent = parent.parent
 
     # TODO: these should be different for windows
-    local = Path("~/.config", CONFIG_NAME_1).expanduser()
+    local = Path("~/.config/makex", CONFIG_NAME_1).expanduser()
 
     if local.exists():
         verbose(f"Reading configuration file at {local}")
@@ -333,7 +333,7 @@ def collect_configurations(
     else:
         local = None
 
-    global_file = Path("/etc", CONFIG_NAME_1).expanduser()
+    global_file = Path("/etc/makex/", CONFIG_NAME_1).expanduser()
 
     if global_file.exists():
         verbose(f"Reading configuration file at {global_file}")

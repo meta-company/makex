@@ -5,7 +5,7 @@
 :relative-docs: documents/
 :relative-images:
 :start-after: <!-- heading -->
-:end-before: <!-- features -->
+:end-before: <!-- heading:end -->
 :heading-offset: 0
 ```
 
@@ -14,7 +14,7 @@
 :relative-docs: documents/
 :relative-images:
 :start-after: <!-- features -->
-:end-before: <!-- links -->
+:end-before: <!-- features:end -->
 :heading-offset: 0
 ```
 
@@ -35,6 +35,7 @@
    workspaces
    checksums
    caching
+   tips
    trouble
    history
    genindex

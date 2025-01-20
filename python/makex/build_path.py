@@ -66,7 +66,7 @@ class OutputPathComponent:
 
 
 # XXX: Unused in makex.
-def create_output_path(new_path: Path, linkpath: Path=None, fix=False):
+def create_output_path(new_path: Path, linkpath: Path = None, fix=False):
     """
     Create the output path.
 
@@ -126,7 +126,7 @@ def get_build_path(
     workspace_id,
     output_folder,
     names=OutputPathComponent,
-):
+) -> tuple[Path, Path]:
     """
     Used by apis.
 
@@ -137,7 +137,7 @@ def get_build_path(
     :param workspace:
     :param workspace_id:
     :param names:
-    :return:
+    :return: the real path and the link path.
     """
     if workspace is None:
         workspace = _get_workspace()
@@ -192,8 +192,7 @@ def _get_parser():
 
     subparser = subparsers.add_parser("create", help="aaa")
     subparser.add_argument(
-        'objective',
-        #nargs="+",
+        'objective', #nargs="+",
         help=f'The objective to work on. Variants may be specified inline after a ? separator. Default={DEFAULT_OBJECTIVE}',
         default=DEFAULT_OBJECTIVE
     )

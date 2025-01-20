@@ -12,8 +12,7 @@ requires-python = ">=3.9"
 dependencies = [
     # XXX: We may revert to this:
     #"progressbar2>=4.3.2",
-    # TODO: remove this dependency.
-    "toml>=0.10.2",
+    'toml>=0.10.2; python_version < "3.11"',
 ]
 authors = [
     { name = "Nate Skulic" },
@@ -46,6 +45,9 @@ use-xattr = [
     # XXX: We don't need this anymore but we can fall back. This xattr package doesn't emit auditing events unlike the builtin.
     #"xattr>=1.0.0",
 ]
+development = [
+    "pyproject-requirements"
+]
 build = [
     "build",
     "shtab",
@@ -66,7 +68,8 @@ documents = [
     "markdown-it-py[linkify,plugins]"
 ]
 typechecking = [
-    "typing_extensions"
+    "typing_extensions",
+    "mypy",
 ]
 
 [project.scripts]

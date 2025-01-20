@@ -20,10 +20,23 @@ class MakexError(Exception):
 
 class SomeKindOfTarget(Protocol):
     name: str
-    path: str
+    path: Union[Path, str]
 
 
 class ExecutionError(MakexError):
+    def __init__(
+        self,
+        error: Union[str, Exception],
+        target: Union[SomeKindOfTarget],
+        location: FileLocation = None
+    ):
+        super().__init__(error)
+        self.error = error
+        self.target = target
+        self.location = location
+
+
+class ExternalExecutionError(MakexError):
     def __init__(
         self,
         error: Union[str, Exception],

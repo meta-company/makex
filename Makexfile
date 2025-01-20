@@ -16,7 +16,7 @@ VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions (YYYYMMSS[equence]).
-VERSION = "20241201"
+VERSION = "20250101"
 
 CHANGE = Environment.get("CHANGE", "")
 
@@ -40,18 +40,18 @@ task(
     outputs=[
         "html/index.html",
     ],
+    # Set the environment for future actions.
+    environment={
+        "BUILDDIR": task_path("documents-html"),
+        "LC_ALL": "C",
+        "RELEASE": VERSION,
+    },
     steps=[
-        # Set the environment for future actions.
-        environment(
-            BUILDDIR=task_path("documents-html"),
-            LC_ALL="C",
-            RELEASE=VERSION,
-        ),
         shell(
             f"source {VENV}/bin/activate",
             f"make -e -C documents clean html",
         ),
-        print(f"Documents available at file://{task_path('documents-html')}/html/index.html")
+        print(f"Documents available at file://{self.path}/html/index.html")
         # all three of these are the same:
         #shell(f"xdg-open $PWD/_output_/documents-html/html/index.html")
         #shell(f"xdg-open {path('documents-html')}/html/index.html")
@@ -61,6 +61,9 @@ task(
 
 task(
     name="upload-documents",
+    requires=[
+        ":documents-html",
+    ],
     steps=[
         execute(
             "upload-documents", "makex", VERSION, "--latest", task_path("documents-html") / "html"
@@ -81,6 +84,7 @@ task(
         #mirror(["documents/Makefile"]), # "documents/source"
         copy("Makexfile"),
         copy("README.md"), #archive(f"makex-{VERSION}-source.zip"),
+        execute("metacompany-generate-source-license", "--output", self.path / "LICENSE.md"),
         copy(
             ["scripts/completions/makex.bash", "scripts/completions/makex.zsh"],
             "python/makex/data/completions"
@@ -98,8 +102,6 @@ task(
     ],
     steps=[
         #shell(
-        #    f"source {VENV}/bin/activate",
-        #    f"python -m build {path('source-package')} --sdist --outdir {path('pypi')}",
         # build the wheel from the source distribution.
         # python -m build --wheel --outdir {path('pypi')} .
         #    f"metacompany-twine {path('pypi')}/*",
@@ -130,8 +132,7 @@ PEX_ARGS += ["--requirement", PEX_ROOT / "requirements.txt"]
 task(
     name="install-pex",
     requires=[
-        #":venv",
-        Reference("venv"),
+        ":venv", #Reference("venv"),
         ":source-package",
     ],
     steps=[
@@ -142,16 +143,12 @@ task(
             VENV_BIN / "pex",
             PEX_ARGS,
             "--output-file",
-            home() / ".local/bin/makex",
+            self.outputs.executable,
         ),
-        # Shells/arguments can be difficult to handle, execute() makes it easier
-        #shell(
-        #    f"{VENV}/bin/pex {space_join(PEX_ARGS)} --output-file ~/.local/bin/makex  {space_join(PEX_REQUIREMENTS)}",
-        #),
     ],
-    outputs=[
-        home() / ".local/bin/makex",
-    ]
+    outputs={
+        "executable": home() / ".local/bin/makex",
+    }
 )
 
 # create a venv
@@ -206,12 +203,14 @@ task(
             #"preamble=\"$(cat scripts/bash-completion/makex-preamble.bash)\"",
             #f"cd python && shtab --shell=bash -u makex.__main__.parser --preamble \"${{preamble}}\" | tee {source('scripts/bash-completion/makex.bash')}", #
             "cd python",
-            f"{PYTHON} -m makex completions --shell bash {source('scripts/completions/makex.bash')}", #
-            f"{PYTHON} -m makex completions --shell zsh {source('scripts/completions/makex.zsh')}", #
+            f"{PYTHON} -m makex completions --shell bash {self.outputs.bash}", #
+            f"{PYTHON} -m makex completions --shell zsh {self.outputs.zsh}", #
         )
     ],
-    outputs=[source('scripts/completions/makex.bash'), source('scripts/completions/makex.zsh')]
-    # makex completions --print bash > ~/.local/share/bash-completion/completions/makex
+    outputs={
+        "bash": source('scripts/completions/makex.bash'),
+        "zsh": source('scripts/completions/makex.zsh'),
+    }, # makex completions --print bash > ~/.local/share/bash-completion/completions/makex
 )
 
 task(
@@ -220,7 +219,7 @@ task(
     steps=[
         shell(
             f"source {VENV}/bin/activate",
-            f"pytest -o cache_dir={task_path('test')}/pytest python",
+            f"pytest -o cache_dir={self.path}/pytest python",
         )
     ]
 )
@@ -267,13 +266,13 @@ def nuitka_target_command_line(
     task(
         name=name,
         requires=requires,
+        environment={
+            "PYTHONPATH": pythonpath,
+            "CCFLAGS": "-march=native -mtune=native -Os",
+        },
         steps=[
-            environment(
-                PYTHONPATH=pythonpath,
-                CCFLAGS="-march=native -mtune=native -Os",
-            ),
-            execute(VENV_BIN / "nuitka3", NUITKA_ARGS, main)
-        ]
+            execute(VENV_BIN / "nuitka3", NUITKA_ARGS, main),
+        ],
     )
 
 
@@ -321,12 +320,12 @@ task(
     requires=[
         ":venv",
     ],
+    environment={
+        "PYTHONPATH": source("python"),
+        "CCFLAGS": "-march=native -mtune=native -Os",
+    },
     steps=[
-        environment(
-            PYTHONPATH=source("python"),
-            CCFLAGS="-march=native -mtune=native -Os",
-        ),
-        execute(VENV_BIN / "nuitka", NUITKA_ARGS, source("python/makex/__main__.py"))
+        execute(VENV_BIN / "nuitka", NUITKA_ARGS, source("python/makex/__main__.py")),
     ]
 )
 
@@ -351,19 +350,11 @@ task(
 # Set MAKEX_RPM_DIST to override the dist
 RPM_NAME = "makex"
 RPM_VERSION = VERSION
-RPM_RELEASE = "1"
-RPM_DIST = Environment.get("MAKEX_RPM_DIST", None)
-
 BUILD_ROOT = task_path("rpm")
-
 RPMBUILD_FLAGS = ["--define", f"_topdir {BUILD_ROOT}"]
 RPMBUILD_FLAGS += ["--define", f"_rpmdir {BUILD_ROOT}"]
 RPMBUILD_FLAGS += ["--define", "_srcrpmdir %{_rpmdir}"]
 RPMBUILD_FLAGS += ["--define", f"version {RPM_VERSION}"]
-RPMBUILD_FLAGS += ["--define", f"release {RPM_RELEASE}"]
-
-if RPM_DIST:
-    RPMBUILD_FLAGS += ["--define", f"dist {RPM_DIST}"]
 
 RPM_SOURCES_FOLDER = task_path("rpm") / "SOURCES"
 

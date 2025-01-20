@@ -1,5 +1,6 @@
 ---
-status: "Draft"
+status: "Accepted"
+version: "20250101"
 ---
 # Proposal: Task Self References
 
@@ -20,6 +21,19 @@ Provide a keyword to refer to property values and attributes of a task.
 
 (TODO: should we have a nameless task_path? (may introduce error))
 
+## Task Properties (or Attributes)
+
+- `self.name`: The tasks name
+
+- `self.path`: The tasks output/cache path.
+
+- `self.inputs`: The tasks inputs. Named inputs can be accesed with the attribute access operator (e.g. `self.outputs.input_name`). 
+  Unnamed inputs can be accessed with the list item operator `self.inputs[int]`.
+
+- `self.ouputs`: The tasks outputs. Named outputs can be accesed with the attribute access operator `self.outputs.output_name`. 
+  Unnamed outputs can be accessed with the list item operator `self.outputs[int]`
+
+## Example
 
 For example:
 
@@ -34,6 +48,9 @@ task(
     # named inputs
     inputs={
         "source": join(self().name, ".c"),
+    },
+    outputs = {
+        "output": "example.o",
     },
     steps=[
         execute("clang", "-o", self.path / self.name, self.inputs),

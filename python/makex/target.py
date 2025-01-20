@@ -1,8 +1,4 @@
 import hashlib
-from abc import (
-    ABC,
-    abstractmethod,
-)
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -15,10 +11,7 @@ from typing import (
     Union,
 )
 
-from makex._logging import (
-    debug,
-    trace,
-)
+from makex._logging import trace
 from makex.constants import HASHING_ALGORITHM
 from makex.context import Context
 from makex.protocols import (
@@ -33,15 +26,6 @@ from makex.workspace import Workspace
 TaskKey = str
 
 HASH_FUNCTION = getattr(hashlib, HASHING_ALGORITHM, "sha1")
-
-
-class TaskBase(ABC):
-    name: str
-
-    @abstractmethod
-    def key(self) -> TaskKey:
-        raise NotImplementedError()
-        # return format_hash_key(self.name, self.path)
 
 
 class Action(Protocol):
@@ -106,7 +90,7 @@ class Hasher:
 
 
 @dataclass
-class EvaluatedTask(TaskBase):
+class EvaluatedTask:
     """
     An "evaluated" target.
 
@@ -132,8 +116,9 @@ class EvaluatedTask(TaskBase):
 
     output_dict: dict[Union[int, str, None], Union[FileStatus, list[FileStatus]]] = None
 
-    # TODO: inputs dictionary, "" or None is for unnamed inputs. used for evaluation of acions
-    inputs_dictionary: dict[Union[str, None], list[Path]] = None
+    # TODO: inputs dictionary, "" or None is for unnamed inputs.
+    #  used for evaluation of actions/arguments/self-references
+    inputs_mapping: dict[Union[str, None], list[Path]] = None
 
     # references to targets this target requires.
     requires: list["EvaluatedTask"] = None
@@ -148,12 +133,15 @@ class EvaluatedTask(TaskBase):
     # actual path to cache; symlinks resolved
     cache_path: Path = None
 
+    # any environment variables defined by the task
+    environment: dict[str, str] = None
+
     @property
     def makex_file_path(self) -> str:
         # TODO: fix this.
         return str(self.location.path)
 
-    def key(self):
+    def key(self) -> TaskKey:
         return format_hash_key(self.name, self.makex_file.path)
 
     def __eq__(self, other: "EvaluatedTask"):
@@ -220,6 +208,11 @@ class EvaluatedTask(TaskBase):
 
                 data.append(f"require:{requirement_hash}")
 
+        if self.environment:
+            environment_string = ";".join(f"{k}={v}" for k, v in self.environment.items())
+            environment_hash = hash_function(environment_string)
+            data.append(f"environment:{environment_hash}")
+
         if self.inputs:
             # XXX: Inputs lists can be large (find()/glob()); optimize by using Hasher.update into one value.
             _hasher = hasher()
@@ -241,13 +234,13 @@ def format_hash_key(name: str, path: Union[PathLike, str]):
 
 
 class EvaluatedTaskGraph:
-    targets: dict[TaskKey, EvaluatedTask]
+    _targets: dict[TaskKey, EvaluatedTask]
     _requires: dict[TaskKey, list[EvaluatedTask]]
     _provides: dict[TaskKey, set[EvaluatedTask]]
     _input_files: dict[Path, set[EvaluatedTask]]
 
     def __init__(self):
-        self.targets = {}
+        self._targets = {}
 
         # list of requires for each target
         self._requires = {}
@@ -264,9 +257,12 @@ class EvaluatedTaskGraph:
         # NOTE: all requires MUST be added first
         assert isinstance(target, EvaluatedTask), f"Got {type(target)}: {target!r}"
         key = target.key()
-        self.targets[key] = target
+        # TODO: only use altkey if the task comes from a default/main makexfile
+        altkey = format_hash_key(target.name, target.input_path)
+        self._targets[key] = target
 
-        # TODO: store in an alternate key for the folder default tasks
+        # store in an alternate key for the folder default tasks
+        self._targets[altkey] = target
 
         # build edges from require -> target
         for require in target.requires:
@@ -358,11 +354,11 @@ class EvaluatedTaskGraph:
 
                 seen.add(key)
 
-    def get_target(self, target: TaskBase) -> Optional[EvaluatedTask]:
-        return self.targets.get(target.key(), None)
+    def get_target(self, target: EvaluatedTask) -> Optional[EvaluatedTask]:
+        return self._targets.get(target.key(), None)
 
     def get_task2(self, task_name: str, path: str) -> Optional[EvaluatedTask]:
-        return self.targets.get(format_hash_key(task_name, path), None)
+        return self._targets.get(format_hash_key(task_name, path), None)
 
     def _scope_list_check(self, scopes, path):
         for scope in scopes:
@@ -427,6 +423,9 @@ class EvaluatedTaskGraph:
 
         for output in target.outputs:
             yield output
+
+    def get_keys(self) -> Iterable[TaskKey]:
+        return self._targets.keys()
 
 
 def brief_task_name(ctx: Context, target: "EvaluatedTask", color=False):

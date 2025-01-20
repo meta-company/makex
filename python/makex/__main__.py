@@ -19,7 +19,6 @@ from os.path import normpath
 from pathlib import Path
 from typing import (
     Any,
-    Iterable,
     Literal,
     Optional,
     Sequence,
@@ -52,6 +51,7 @@ from makex.errors import (
     CacheError,
     Error,
     ExecutionError,
+    ExternalExecutionError,
     GenericSyntaxError,
     MultipleErrors,
 )
@@ -71,7 +71,6 @@ from makex.run import (
     get_running_process_ids,
     run,
 )
-from makex.target import EvaluatedTaskGraph
 from makex.ui import (
     UI,
     is_ansi_tty,
@@ -246,6 +245,14 @@ def _add_global_arguments(base_parser, cache: Path = None, documentation: bool =
         default=False,
         help=help or help_text,
     )
+
+    base_parser.add_argument(
+        # "-d",
+        "--python-audit",
+        nargs="?",
+        action="append",
+        help="Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.",
+    )
     return base_parser
 
 
@@ -258,7 +265,7 @@ def parser(cache: Path = None, documentation: bool = True):
     if documentation: # XXX: Documentation mode. For sphinx. Don't calculate cpus default.
         cpus = None
     elif system in {"Linux"}:
-        cpus = len(os.sched_getaffinity(0))
+        cpus = max(len(os.sched_getaffinity(0)), 1)
     elif system == "windows":
         # Windows
         cpus = psutil.Process().cpu_affinity()
@@ -270,9 +277,9 @@ def parser(cache: Path = None, documentation: bool = True):
     def add_threads_argument(subparser):
         subparser.add_argument(
             #"-t",
-            "--threads",
+            "--cpus",
             type=int,
-            help="Worker threads to spawn for running/evaluating tasks in parallel. Automatically detected.",
+            help=f"Worker cpus to spawn for running/evaluating tasks in parallel. (Default: {cpus})",
             default=cpus
         )
 
@@ -605,7 +612,7 @@ def print_error(ctx: Context, error):
     elif isinstance(error, MultipleErrors):
         for error in error.errors:
             print_error(ctx, error)
-    elif isinstance(error, ExecutionError):
+    elif isinstance(error, (ExecutionError, ExternalExecutionError)):
         if error.location:
             print(pretty_makex_file_exception(error.error, error.location, colors=ctx.colors))
         else:
@@ -736,6 +743,7 @@ def init_context_standard(cwd, args):
         colors=colors,
         ui=UI(verbosity=verbosity, colors=colors),
         dry_run=getattr(args, "dry", False),
+        cpus=args.cpus,
     )
     ctx.workspace_cache.add(workspace)
     try:
@@ -949,6 +957,8 @@ def main_get_path(args, extra):
         output_folder=ctx.output_folder_name,
     )
 
+    # TODO: allow getting the path of a specific output file
+
     path, link = obj
 
     if args.real:
@@ -993,7 +1003,7 @@ def main_get_outputs(args):
     t = graph.get_target(target)
     if t is None:
         ctx.ui.print(
-            f"Target \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
+            f"Task \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
             error=True
         )
         sys.exit(-1)
@@ -1390,7 +1400,7 @@ def main_run(args, extra_args):
         t = graph.get_target(target)
         if t is None:
             ctx.ui.print(
-                f"Target \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
+                f"Task \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
                 error=True
             )
             sys.exit(-1)
@@ -1410,7 +1420,7 @@ def main_run(args, extra_args):
                 ctx.ui.print(f"- //{input}:{target.name}")
 
     # XXX: Currently set to one to avoid much breakage. Things are fast enough, for now.
-    workers = 1 or args.threads
+    workers = args.cpus
     executor = Executor(ctx, workers=workers, force=args.force)
 
     try:
@@ -1450,10 +1460,20 @@ COMMANDS = {
 
 
 def main():
+
     signal.signal(signal.SIGINT, _handle_signal_interrupt)
     signal.signal(signal.SIGTERM, _handle_signal_terminate)
 
     args, extra_args = parser(documentation=False).parse_known_args()
+
+    if args.python_audit:
+        events = set(args.python_audit)
+
+        def audit(event, args):
+            if event in events:
+                print(f'audit: {event} with args={args}')
+
+        sys.addaudithook(audit)
 
     level = logging.NOTSET
 

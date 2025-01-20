@@ -37,7 +37,7 @@ See the {ref}`differences<python-differences>` for more details.
 ```{tip}
 Keep your Makex Files simple. Don't be too clever. 
 
-The makex file format/language is designed to be simple (simpler than python) and easy/fast to process (almost statically, if necessary).
+The Makex file format/language is designed to be simple (simpler than Python) and easy/fast to process (almost statically, if necessary).
 
 Makex files are designed to evaluate quickly without running subprocesses.
 ```
@@ -69,8 +69,16 @@ multiline comment.
 
 ## Strings
 
-String objects in Makex have the following structure:
+Strings are defined as in Python, surrounded by quotation markers (`'` or `"`). 
+Multiline strings may be surrounded by triple quotation markers (`"""` or `'''`).
 
+Quotation marks prefixed with the letter `f` denote a formatted string (e.g. `f"Example string"`). 
+Formatted strings may contain placeholders for variables that will be rendered when necessary. 
+For example, `f"Hello {name}"`, defines a string with a placeholder called `name`.
+
+Depending on how formatting strings are defined and used, their rendering may be deferred. This allows embedding references or paths in strings which can be expanded correctly. Typically, a formatted string with any type of `UnresolvedPath` objects can not be rendered outside the scope of a task definition.
+
+String objects defined in Makex files have the following structure:
 
 ```{eval-rst}
 .. py:class:: String
@@ -89,7 +97,21 @@ String objects in Makex have the following structure:
 A wide range of built-in methods for {py:class}`Python strings <str>` and other primitive types (such as  {py:class}`lists <list>` and  {py:class}`dictionaries <dict>`) are not defined or enabled.
 ```
 
+## Lists
 
+Lists in Makex may be defined using the open and closing brackets to items (e.g. `["item1", "item2"]`).
+
+## None
+
+The name `None` is used as a null value.
+
+A `None` value in makex is typically ignored or skipped. `None` values are not serialized to strings.
+
+## Mappings (aka Dictionaries)
+
+Mappings in Makex may be defined using the open and closing braces to define keys and values (e.g. `{"key1": "value1", "key2": "value2", ...}`).
+
+Mappings must use Strings for the keys, and the values may be any type as required/used.
 
 (functions)=
 ```{include} syntax-functions.md
@@ -101,16 +123,18 @@ A wide range of built-in methods for {py:class}`Python strings <str>` and other 
 :heading-offset: 1
 ```
 
+<!--
 (environment-variables)=
 ```{include} syntax-environment.md
 :heading-offset: 1
 ```
+-->
 
 ## Self Documentation
 
 A multiline comment string may be included at the top of the Makex file to document it.
 
-This string may be written in markdown with restructured text to provide help or description in other formats/renderings.
+This string may be written in markdown with restructured text to provide help or description in other formats/renderings (see [MyST](https://myst-parser.readthedocs.io/en/latest/)).
 
 (python-differences)=
 ## Differences from Python Syntax
@@ -132,13 +156,13 @@ This string may be written in markdown with restructured text to provide help or
 
 ## Formatting
 
-When calling functions or constructing lists or dictionaries you should leave an trailing comma at the end of the list or dictionary.
+When calling functions or constructing lists or dictionaries you should leave a trailing comma at the end of the list or dictionary.
 This helps when adding or changing values later.
 
 It is preferred to break functions/callables with keyword arguments into separate lines with a keyword argument per line.
 Actions like `execute()` or `copy()` may be left on a single line if they fit, and may omit the trailing comma.
 
-We plan to introduce automatic formatting.
+We plan to introduce automatic formatting. Until then, we recommend tools like `yapf` or `black` to keep your Makex files formatted.
 
 Keep your Makex files simple.
 

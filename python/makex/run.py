@@ -123,7 +123,12 @@ def run(
 
 def tail_out(sel, p, enable_output=True, color_error="", color_escape=""):
     while True:
-        for key, _ in sel.select():
+        # XXX: Some things exit while we are looping here.
+        returncode = p.poll()
+        if returncode is not None:
+            return
+
+        for key, events in sel.select(timeout=1):
             data = key.fileobj.read1().decode()
             if not data:
                 return

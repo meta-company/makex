@@ -118,7 +118,7 @@ if False:
     DEFAULT_IGNORE_PATTERN = "^(?={0})".format("|".join(DEFAULT_IGNORE_PATTERNS))
 else:
     # precompile the pattern for reduced start up time.
-    DEFAULT_IGNORE_PATTERN = '^(?=(?s:.*(\.pyc))\Z|(?s:.*(_output_|.pytest_cache|.hg|.venv|.git|__pycache__))\Z)'
+    DEFAULT_IGNORE_PATTERN = '^(?=(?s:.*(\.pyc))\Z|(?s:.*(_output_|\.pytest_cache|\.hg|\.venv|\.git|__pycache__))\Z)'
 
 # True to use builtin reflinks instead of reflinks pypi package
 BUILT_IN_REFLINKS = True
@@ -139,7 +139,6 @@ STORE_TASK_HASH_IN_OUTPUT_FILES = False
 
 # Included files will have all globals available to them (defined prior to the include() call)
 PASS_GLOBALS_TO_INCLUDE = False
-
 
 # the marker/character between a path and a task in task locators
 TASK_PATH_NAME_SEPARATOR = ":"

@@ -103,11 +103,28 @@ IMPORT_ENABLED = _get_bool("IMPORT_ENABLED", False)
 # the builtin file names.
 CONFIGURATION_FILE_NAME = _get_string("CONFIGURATION_FILE_NAME", None)
 
+# If True, enable task self references; e.g. self.outputs, self.inputs, self.path, self.name
 TASK_SELF_ENABLED = _get_bool("TASK_SELF_ENABLED", True)
 
 # If true, any requirements inside of task's or a task's steps will be added to the task's requirements.
 # False so that users are explicit.
 IMPLICIT_REQUIREMENTS_ENABLED = _get_bool("IMPLICIT_REQUIREMENTS_ENABLED", False)
+
+# Enable late joined strings. String of the form f"{variable1}text1{variable2}text3" will be decomposed into a
+# JoinedString(variable1, "text1", variable2, "text") which can be evaluated later.
+LATE_JOINED_STRINGS = _get_bool("LATE_JOINED_STRINGS", True)
+
+# Enable optional task requirements.
+OPTIONAL_REQUIREMENTS_ENABLED = _get_bool("OPTIONAL_REQUIREMENTS_ENABLED", True)
+
+# Enable paths in globs as a first argument.
+PATH_IN_GLOB_ENABLED = _get_bool("PATH_IN_GLOB_ENABLED", True)
+
+# Enable debugging of scheduling/queueing code. This will emit a lot of log messages while tasks are waiting/executing.
+SCHEDULE_DEBUG_ENABLED = _get_bool("SCHEDULE_DEBUG_ENABLED", False)
+
+# Enable reading makex config files from the current working directory or any ancestors.
+READ_CONFIG_FROM_PARENTS = _get_bool("READ_CONFIG_FROM_PARENTS", False)
 
 # Strict mode
 # - Disable the shell (unless really explicit)

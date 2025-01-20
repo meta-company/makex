@@ -84,6 +84,10 @@ Some steps to debug a hang:
   - If the command hangs or waits for input, you'll need to figure out a way to make it run without waiting for input.
   - If the command completes, this may be a problem with Makex. 
 
+### Makex hangs during copying a folder
+
+This can happen if the folder or its contents has recursive symlinks.
+
 ### Makex hangs, prints an exception, stack trace, or does something unexpected
 
 Please send us a text copy of the output of the run with the {option}`--debug <makex --debug>` arguments enabled. 

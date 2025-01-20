@@ -18,6 +18,7 @@ call(`//macros.mx:macro`, **kwargs)
 ```
 
 Obviously, macros must not conflict with possible task names. This is unlikely if the macros are defined in a separate file, but may happen if a macro is used in the same file as it is defined.
+An argument to the macro function may be used to define/redefine the exported name.
 
 This doesn't really change performance much. As an optimization we may delay the `call` evaluation until later.
 
