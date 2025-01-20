@@ -202,17 +202,21 @@ If `DIRECT_REFERENCES_TO_MAKEX_FILES` is enabled, the `path` argument may be a p
   :param pattern: Patterns of files to include.
 ```
 
-```{tip}
-Folder/Recursive patterns: `**` (e.g. `**.py` will match python files in any directory)
+Globs support the following syntax: 
 
-Match a file with extension: `*.py`
+- `/` to separate path segments.
+- `*` to match zero or more characters in a path segment.
+- `?` to match on one character in a path segment.
+- `**` to match zero or more folders. (e.g. `**.py` will match python files in any directory)
+- `[]` to declare a range of characters to match.
+- `{}` to declare a set of patterns to match.
+- `[!...]` to negate a range of characters to match.
+
+```{tip}
+
+Match a file with extension: `*.c`
+
+Match a file with extension recursively: `**.c`
 
 Match files with multiple extensions: `*.{py,md,txt}`
-
-Match any single character: `?`
-
-
-.. Match a character in sequence: `[seq]`
-
-.. Match a character not in sequence: `[!seq]`
 ```

@@ -34,10 +34,9 @@ if NAME == "linux":
 
 ```
 
-Variants specified on the command line set the variants for top level Makex files.
+Variants specified on the command line set the variants for top-level Makex files.
 
-If a variant is not found in the Makex file, all the Makex files in parent folders, up to the root(`/`) or Workspace(WORKSPACE)
-will be evaluated and searched for the variant. 
+If a variant is not found in the Makex file, all the Makex files in parent folders, up to the root(`/`) or Workspace(WORKSPACE) will be evaluated and searched for the variant. 
 
 In other words, variants in child Makex files inherit those of all the parents.
 

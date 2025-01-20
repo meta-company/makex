@@ -38,6 +38,7 @@
    tips
    trouble
    history
+   comparison
    genindex
    
 .. toctree::
@@ -56,7 +57,6 @@
    proposals/tasks-iterable-run-list
    proposals/tasks-named-io
    proposals/workspaces-overlay
-   comparison
    how-it-works
    syntax-actions
    syntax-includes

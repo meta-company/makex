@@ -62,7 +62,7 @@ Makex generates checksums of input/output files. At the moment, this is currentl
 
 It's usually best to just wait for the file hashing to complete for the set of input files.
 
-You may omit large output files from the Task's outputs and this will prevent hashing.
+You may omit large output files from the Task's outputs and this will prevent hashing them.
 
 <!--
 offline checksumming
@@ -72,7 +72,7 @@ offline checksumming
 
 NOTE: If a shell/execute/command waits for input, Makex will hang. This is by design. 
 Several executables may be run in parallel, and it is indeterminable which
-one needs which standard input.
+one needs or will wait for standard input.
 
 Repeat, all executables Makex runs must not require and wait user input (e.g. using readline()).
 

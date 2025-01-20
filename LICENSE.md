@@ -68,7 +68,7 @@ This license explicitly defines Permissions not granted:
 * You may not offer the Source or the Transformed Source as part of a service or product; for sale or distribution.  
 * You may not relicense the Source under different terms or conditions.
 
-## **Revocation**
+## Revocation
 
 This License may be revoked by the Licensor at any time for any reason.  
 If this License has been revoked, the Licensee must immediately cease use and distribution of the Source.   
@@ -105,7 +105,7 @@ Parts of the Source may incorporate other Sources licensed with different terms;
 
 In no event and under no legal theory shall the Licensor be liable for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Source (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if the Licensor has been advised of the possibility of such damages.
 
-## **Accepting Warranty or Additional Liability or Non-Licensor Obligations**
+## Non-Licensor Obligations
 
 While redistributing the Source or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, liability or other obligations consistent with this License (Non-Licensor Obligations). 
 

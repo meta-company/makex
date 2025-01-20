@@ -2,7 +2,7 @@
 
 <!-- heading -->
 
-Makex is a new and simplified build and automation tool.
+Makex is a modern build and automation tool.
 
 It __*makex*__ stuff happen. 🙂
 

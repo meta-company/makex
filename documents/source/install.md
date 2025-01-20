@@ -7,7 +7,7 @@ Install Makex:
 
 ```shell
 
-pip install --user makex
+pip install makex
 ```
 
 The Makex executable will be installed to `~/.local/bin/makex`.

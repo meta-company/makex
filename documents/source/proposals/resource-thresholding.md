@@ -15,7 +15,13 @@ Conversely, if one or more task executions use a high amount of memory, newly qu
 
 Developers using makex would prefer it didn't use all of their machine's resources. No build tools have obvious ways to control these resource constraints.
 
-We need a way to dynamically allocate load based on machine specifications and metrics.
+Tasks that require minimum memory are uncommon, but do exist. These are typically:
+
+- linker steps/executables
+- large scale build tools
+- inefficient build tools and packers (e.g. typescript, webpack, etc) 
+
+We need a way to dynamically allocate load based on machine specifications and metrics, and task requirements.
 
 Constraints in order of weight are:
 
@@ -36,7 +42,7 @@ The argument may be specified multiple times.
 The form of the argument is:
 
 ```
-"--constrain" {namespace} ":" {name} ":" {value} [ "{" {labels} "}" ]
+"--constrain" {namespace} ":" {name} "=" {value} [ "{" {labels} "}" ]
 ```
 
 - The placeholder `{namespace}` is one of `memory`, `cpu`, `load`, `tasks`.
@@ -48,6 +54,24 @@ The form of the argument is:
 
 - Optional `{labels}` is a set of one or more labels separated by comma. If omitted
 the constraint will apply to all tasks.
+
+Labels may be added to tasks which marks their constraints. For example,
+
+```python
+task(
+    name="example",
+    # mark this task as requiring 1G of memory.
+    # i.e. do not run this task until 1G of memory is free.
+    labels={"memory:minimum=1G"},
+    # TODO: maybe a better idea is a separate namespace/type
+    #  then we can access self.constraints["memory:maximum"] in tasks.
+    #  self.constrains[name] should return an object with several properties
+    #  by default, it should return the most primitive/unit value (e.g. bytes, count)
+    #  the object should be able to be converted/serialized using different units as potentially required by an executable.
+    constraints={"memory:minimum": "1G"}
+)
+```
+
 
 Constraints may be defined in the makex configuration file where they may be applied per machine, or per user. (TODO: do constraints merge?; probably yes)
 

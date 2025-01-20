@@ -21,10 +21,9 @@ The name of a file can be specified absolutely.
 The list of files to check can be specified on the {option}`command line<makex --makex-file-names>` or configuration file.
 --> 
 
-If several of these files exist in a directory, they will be searched in the order specified. The first match will be used as the 
-folder's primary (or default) Makex file.
+If several of these files exist in a directory, they shall be searched in the order specified. The first match shall be used as the folder's primary (or default) Makex file.
 
-The extension of makex files is `.mx`.
+The extension of Makex files is `.mx`.
 
 <!-- They will be tested, in order, for a 
 magic marker to see if they are a Makex file and the first Makex-looking file will be parsed. -->
@@ -53,7 +52,7 @@ At the moment, this marker is entirely optional.
 #!makex
 ```
 
-The word makex can be anywhere on the line after the `#!`.
+The word `makex` can be anywhere on the line after the `#!`.
 
 ## Commenting
 
@@ -72,8 +71,8 @@ multiline comment.
 Strings are defined as in Python, surrounded by quotation markers (`'` or `"`). 
 Multiline strings may be surrounded by triple quotation markers (`"""` or `'''`).
 
-Quotation marks prefixed with the letter `f` denote a formatted string (e.g. `f"Example string"`). 
-Formatted strings may contain placeholders for variables that will be rendered when necessary. 
+Quotation marks prefixed with the letter `f` denote a formatted string (For example, `f"Example string"`). 
+Formatted strings may contain placeholders for variables that shall be rendered when necessary. 
 For example, `f"Hello {name}"`, defines a string with a placeholder called `name`.
 
 Depending on how formatting strings are defined and used, their rendering may be deferred. This allows embedding references or paths in strings which can be expanded correctly. Typically, a formatted string with any type of `UnresolvedPath` objects can not be rendered outside the scope of a task definition.
@@ -99,19 +98,26 @@ A wide range of built-in methods for {py:class}`Python strings <str>` and other 
 
 ## Lists
 
-Lists in Makex may be defined using the open and closing brackets to items (e.g. `["item1", "item2"]`).
+As in Python, lists in Makex may be defined using the open and closing brackets to define items (For example, `["item1", "item2"]`).
+
+The only supported method is `append`. 
+Lists may be concatenated using the `+` or `+=` operators.
+
+It is not recommended to modify (or mutate) lists away from their definition site.
+
+## Mappings
+
+As in Python, Mappings (or Dictionaries) in Makex may be defined using the open and closing braces to define keys and values (For example, `{"key1": "value1", "key2": "value2", ...}`).
+
+Mappings must use Strings for the keys, and the values may be any type as required/used.
+
+It is not recommended to modify (or mutate) Mappings away from their definition site.
 
 ## None
 
 The name `None` is used as a null value.
 
-A `None` value in makex is typically ignored or skipped. `None` values are not serialized to strings.
-
-## Mappings (aka Dictionaries)
-
-Mappings in Makex may be defined using the open and closing braces to define keys and values (e.g. `{"key1": "value1", "key2": "value2", ...}`).
-
-Mappings must use Strings for the keys, and the values may be any type as required/used.
+A `None` value in Makex is typically ignored or skipped. `None` values are not serialized to strings.
 
 (functions)=
 ```{include} syntax-functions.md
@@ -132,7 +138,7 @@ Mappings must use Strings for the keys, and the values may be any type as requir
 
 ## Self Documentation
 
-A multiline comment string may be included at the top of the Makex file to document it.
+A multi-line comment string may be included at the top of the Makex file to document it.
 
 This string may be written in markdown with restructured text to provide help or description in other formats/renderings (see [MyST](https://myst-parser.readthedocs.io/en/latest/)).
 
@@ -140,7 +146,7 @@ This string may be written in markdown with restructured text to provide help or
 ## Differences from Python Syntax
 
 - Import statements (`import ...` or `from ... import ...`) to any standard libraries are not allowed in Makex Files.
-  Future versions of makex will include modularization features.
+  Future versions of Makex shall include modularization features.
 
 - String syntax and functions are restricted.
 
@@ -162,7 +168,7 @@ This helps when adding or changing values later.
 It is preferred to break functions/callables with keyword arguments into separate lines with a keyword argument per line.
 Actions like `execute()` or `copy()` may be left on a single line if they fit, and may omit the trailing comma.
 
-We plan to introduce automatic formatting. Until then, we recommend tools like `yapf` or `black` to keep your Makex files formatted.
+We plan to introduce automatic formatting. Until then, tools like `yapf` or `black` are recommended to keep your Makex files formatted.
 
 Keep your Makex files simple.
 

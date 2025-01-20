@@ -6,9 +6,10 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 import os
+from datetime import datetime
 
 project = 'makex'
-copyright = '2024 Makex Authors'
+copyright = f'{datetime.now().year} Makex Authors'
 author = "Makex Authors"
 
 # The full version, including alpha/beta/rc tags
@@ -60,10 +61,7 @@ NOTFOUND = True
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = [
-    "sphinx.ext.viewcode",
-    "sphinx.ext.todo"
-]
+extensions = ["sphinx.ext.viewcode", "sphinx.ext.todo"]
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -129,14 +127,13 @@ html_title = "Makex Documentation"
 # default: ``['localtoc.html', 'relations.html', 'sourcelink.html',
 # 'searchbox.html']``
 html_sidebars = {
-    '**':
-        [
-            'indexsidebar.html',
-            'localtoc.html',
-            'searchbox.html',
-            'sidebarhelp.html',
-            'sourcelink.html',
-        ],
+    '**': [
+        'indexsidebar.html',
+        'localtoc.html',
+        'searchbox.html',
+        'sidebarhelp.html',
+        'sourcelink.html',
+    ],
     'index': ['indexsidebar.html', 'searchbox.html', 'sidebarhelp.html', 'sourcelink.html'],
 }
 

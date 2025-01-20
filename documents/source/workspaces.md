@@ -15,6 +15,10 @@ Defining a Workspace is highly recommended.
 ## Defining a Workspace
 
 Workspaces are defined using the {envvar}`WORKSPACE<WORKSPACE>` environment variable or a `WORKSPACE` file.
+
+Using the environment variable to set a workspace is preferred as it is simpler to switch workspaces. 
+If you plan to work on a [mostly] self-contained repository, a WORKSPACE file may be appropriate in the root of the repository. 
+It is recommended to export the WORKSPACE environment variable to all shells so that you can use makex and reference tasks from any folder.
 <!--
 the {data}`workspace<TOML.makex.workspace>` in a Makex configuration file
 the {option}`workspace <makex --workspace>` command line argument

@@ -1,7 +1,7 @@
 
 # Actions
 
-Each task can accept a list of "Actions" that will be run when the task is executed.
+Each task can accept a list of "Actions" that are run when the task is executed.
 
 For example:
 

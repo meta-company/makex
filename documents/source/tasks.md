@@ -63,8 +63,7 @@ task(
 ```
 
 
-If a requirement changes, the Task requiring it will be considered "stale" or "dirty". Stale Tasks need to be executed to produce
-fresh outputs.
+If a requirement changes, the Task requiring it will be considered "stale" or "dirty". Stale Tasks need to be executed to produce fresh outputs.
 
 A Task with outputs, and without any requirements will always be run.
 
@@ -162,7 +161,7 @@ A Task may define a list of output files.
 If any files are generated as part of running the Task are used, they should be specified.
 The output files should be specified with paths relative to the Task's output path.
 
-If a Task has outputs, makex will use hashes, checksums and caching strategies to see if the Task needs to be run to reproduce the outputs.
+If a Task has outputs, Makex will use hashes, checksums and caching strategies to see if the Task needs to be run to reproduce the outputs.
 
 A Task with no defined output files will always be run. 
 If no output files are defined, Makex will be unable to determine if the Task's outputs are stale;
@@ -222,7 +221,7 @@ NOTE: This feature is experimental and subject to change. See the proposal.
 ```
 
 Some of the properties of a task may be referred to within the task itself.
-This is a provided to mitigate duplication and redundancy (and associated errors).
+This is provided to mitigate duplication and redundancy (and associated errors).
 These properties may only be used and accessed _within_ a `task()` definition.
 
 These properties are:
@@ -255,4 +254,4 @@ task(
 ```
 
 If any named inputs/outputs are defined as a list, accessing `self.inputs.name` or `self.outputs.name` will return that list. 
-You may not access members of the list individually (e.g. using the index operation `self.inputs.example[index]`).
+You may not access members of the list individually (For example, using the index operation `self.inputs.example[index]`).

@@ -2,10 +2,10 @@
 
 ## File
 
-The Makex configuration file allows one to override some aspects of makex. 
-A configuration file is not required for basic use of Makex.
+The Makex configuration file allows one to override some aspects of Makex. 
+A configuration file is not required to use Makex.
 
-The configuration file itself may be located in a number of places:
+The configuration file itself may be located in several places:
 
 <!-- In the current working directory or its parents (as `makex.toml` or `.makex.toml`). -->
 - The user's configuration directory (`~/.config/makex/makex.toml`).
@@ -18,7 +18,7 @@ These locations are checked in order, and the configuration is merged with the s
 
 ### makex
 
-toml configuration files are specified with sections. `makex` is the primary section to configure makex.
+toml configuration files are specified with sections. `makex` is the primary section to configure Makex.
 
 ```{eval-rst}
 
@@ -99,13 +99,13 @@ toml configuration files are specified with sections. `makex` is the primary sec
 
 ## Environment Variables
 
-Environment variables override some aspects of makex.
+Environment variables override some aspects of Makex.
 
 ```{eval-rst}
 
 .. envvar:: WORKSPACE
 
-   The current Workspace. See :doc:`the Workspaces documentation <workspaces>` for more information.
+   The path of the current Workspace. See :doc:`the Workspaces documentation <workspaces>` for more information.
 ```
 
 
