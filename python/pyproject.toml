@@ -7,8 +7,10 @@ name = "makex"
 dynamic = ["version"]
 description = "Build tool"
 readme = { file = "README.md", content-type = "text/markdown" }
-license = "LicenseRef-MetaCompany-Source-License"
-license-files = [ "LICENSE.md" ]
+license = { text = "LicenseRef-MetaCompany-Source-License-2024-1" }
+# configuration error: `project` must not contain {'license-files'} properties
+# does not work per: https://peps.python.org/pep-0639/
+# license-files = ["LICENSE.md"]
 
 requires-python = ">=3.9"
 dependencies = [
