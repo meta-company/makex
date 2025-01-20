@@ -7,7 +7,9 @@ name = "makex"
 dynamic = ["version"]
 description = "Build tool"
 readme = { file = "README.md", content-type = "text/markdown" }
-license = { file = "LICENSE.md", content-type = "text/markdown" }
+license = "LicenseRef-MetaCompany-Source-License"
+license-files = [ "LICENSE.md" ]
+
 requires-python = ">=3.9"
 dependencies = [
     # XXX: We may revert to this:
@@ -32,6 +34,11 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
+[project.urls]
+Homepage = "https://meta.company/go/makex"
+Documentation = "https://meta.company/go/makex"
+Repository = "https://hg.sr.ht/~metacompany/makex"
+History = "https://hg.sr.ht/~metacompany/makex/browse/HISTORY.md?rev=tip"
 
 [tool.setuptools.dynamic]
 version = { attr = "makex.version.VERSION" }

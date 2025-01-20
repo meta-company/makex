@@ -16,7 +16,7 @@ VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions (YYYYMMSS[equence]).
-VERSION = "20250101"
+VERSION = "20250102"
 
 CHANGE = Environment.get("CHANGE", "")
 
