@@ -5,7 +5,7 @@ Makex uses hashes (or checksums) as part of the execution process to reduce the 
 ## Hashing Files
 
 Makex will create and store hashes of a Task's input and output files, 
-and the hashes of the Makex file in which the task was defined.
+and the hashes of the Makex file in which the Task was defined.
 
 Each file Makex acts on has a `hash` of its contents, which, is a digest; and a `fingerprint`, 
 which, is its modification time concatenated with its size. 
@@ -23,7 +23,7 @@ Makex uses a strategy to hash Tasks. Hashing a Task involves making a unique and
 - The Task's required input files.
 - The unique and stable identifier of any of the Task's requirements which may be Tasks themselves.
 - The Task's Actions, and their arguments.
-- The Makex file in which the task was defined. Note: Any changes to this file will cause a task to become stale.
+- The Makex file in which the Task was defined. Note: Any changes to this file will cause a Task to become stale.
 - Any Environment variables _used_ in the Makex File. Environment variables which are used in a Makex file are recorded.
 
 If any of these change, the hash will change, and the Task will be re-executed.
@@ -46,7 +46,7 @@ where `{type}` is one of `sha256` or `md5`.
 If a filesystem without extended attribute support is detected, Makex will fall back to storing hashes in a local database.
 
 ```{note}
-Currently, this detection will fail if the filesystem is read-only.
+Extended attributed detection will fail if the filesystem is read-only.
 ```
 
 

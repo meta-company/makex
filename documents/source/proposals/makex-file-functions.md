@@ -29,7 +29,7 @@ def example_action():
 def example_macro(name:str, argument1:Path):
     target(
         name=f"example-{name}",
-        requires=[
+        inputs=[
             argument1
         ],
         steps=[

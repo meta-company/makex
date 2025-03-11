@@ -26,6 +26,7 @@ from typing import (
 )
 
 from makex._logging import (
+    debug,
     initialize_logging,
     trace,
 )
@@ -35,20 +36,27 @@ from makex.colors import (
     ColorsNames,
     NoColors,
 )
+from makex.commands.fix import main_fix_parser
 from makex.configuration import (
-    ConfigurationError,
     collect_configurations,
     evaluate_configuration_environment,
     read_configuration,
 )
 from makex.constants import (
+    ABSOLUTE_WORKSPACE,
     CONFIGURATION_ARGUMENT_ENABLED,
     DIRECT_REFERENCES_TO_MAKEX_FILES,
+    SYNTAX_2025,
+    TASK_PATH_NAME_SEPARATOR,
     WORKSPACE_ARGUMENT_ENABLED,
 )
-from makex.context import Context
+from makex.context import (
+    Context,
+    detect_shell,
+)
 from makex.errors import (
     CacheError,
+    ConfigurationError,
     Error,
     ExecutionError,
     ExternalExecutionError,
@@ -56,13 +64,17 @@ from makex.errors import (
     MultipleErrors,
 )
 from makex.executor import Executor
-from makex.flags import VARIANTS_ENABLED
+from makex.flags import (
+    MAKEX_SYNTAX_VERSION,
+    VARIANTS_ENABLED,
+)
+from makex.locators import format_locator
 from makex.makex_file import MakexFileCycleError
 from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
 )
-from makex.makex_file_types import ResolvedTaskReference
+from makex.makex_file_types import TaskReference
 from makex.python_script import (
     PythonScriptError,
     PythonScriptFileError,
@@ -246,13 +258,15 @@ def _add_global_arguments(base_parser, cache: Path = None, documentation: bool =
         help=help or help_text,
     )
 
-    base_parser.add_argument(
-        # "-d",
-        "--python-audit",
-        nargs="?",
-        action="append",
-        help="Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.",
-    )
+    if documentation is False:
+        base_parser.add_argument(
+            # "-d",
+            "--python-audit",
+            nargs="?",
+            action="append",
+            help=help or
+            "Enable auditing of python audit hooks. Pass a identifier. May be passed multiple times.",
+        )
     return base_parser
 
 
@@ -263,7 +277,7 @@ def parser(cache: Path = None, documentation: bool = True):
 
     system = platform.system()
     if documentation: # XXX: Documentation mode. For sphinx. Don't calculate cpus default.
-        cpus = None
+        cpus = 1
     elif system in {"Linux"}:
         cpus = max(len(os.sched_getaffinity(0)), 1)
     elif system == "windows":
@@ -279,7 +293,7 @@ def parser(cache: Path = None, documentation: bool = True):
             #"-t",
             "--cpus",
             type=int,
-            help=f"Worker cpus to spawn for running/evaluating tasks in parallel. (Default: {cpus})",
+            help=f"Worker CPUs to use for parsing, evaluating and running tasks in parallel. (Default: {cpus})",
             default=cpus
         )
 
@@ -327,7 +341,7 @@ def parser(cache: Path = None, documentation: bool = True):
     subparser.add_argument(
         "--force",
         action="store_true",
-        help="Always run all task even if they don't need to be.",
+        help="Always run all tasks even if they don't need to be.",
     ) #"-f",
 
     subparser.add_argument(
@@ -353,9 +367,7 @@ def parser(cache: Path = None, documentation: bool = True):
             help="Specify file ignore patterns for input/output files.",
         )
 
-    if True:
-        # XXX: Currently disabled.
-        add_threads_argument(subparser)
+    add_threads_argument(subparser)
 
     ######## path
     subparser = subparsers.add_parser(
@@ -472,14 +484,15 @@ def parser(cache: Path = None, documentation: bool = True):
     )
     subparser.add_argument(
         "--paths",
-        choices=["absolute", "workspace", "relative", None],
-        default=None,
-        help="Path to a makex file or directory",
+        choices=["absolute", "workspace", "relative"],
+        default="workspace",
+        help="How to output paths of tasks. `relative` is relative to the current folder.",
     )
     subparser.add_argument(
         "--prefix",
         default=False,
         action="store_true",
+        help="May be used to prefix all paths.",
     )
 
     ######### completions command
@@ -541,6 +554,9 @@ def parser(cache: Path = None, documentation: bool = True):
     )
     subparser.set_defaults(command_function=main_version)
 
+    ######### fix command
+    main_fix_parser(subparsers)
+
     return parser
 
 
@@ -573,7 +589,7 @@ def _handle_signal_terminate(_signal, frame):
 
 def parse_scope(scope):
     type = None
-    if scope.startswith("//"):
+    if scope.startswith(ABSOLUTE_WORKSPACE):
         workspace = get_workspace()
         if workspace is None:
             raise Exception("Workspace prefix // used but no WORKSPACE defined.")
@@ -711,7 +727,7 @@ def init_context_standard(cwd, args):
         )
         try:
             configuration_environment = evaluate_configuration_environment(
-                shell=configuration.shell or Context.shell,
+                shell=configuration.shell or detect_shell(),
                 env=configuration.environment,
                 current_enviroment=current_enviroment,
                 cwd=cwd,
@@ -764,7 +780,13 @@ def try_change_cwd(cwd: str):
     return cwd
 
 
-def parse_target(ctx, base: Path, string: str, check=True) -> Optional[ResolvedTaskReference]:
+def parse_target(
+    ctx,
+    base: Path,
+    string: str,
+    check=True,
+    syntax=MAKEX_SYNTAX_VERSION,
+) -> Optional[TaskReference]:
     """
     A variation of parse target which prints errors
     :param base:
@@ -775,17 +797,21 @@ def parse_target(ctx, base: Path, string: str, check=True) -> Optional[ResolvedT
 
     # resolve the path/makefile?:target_or_build_path name
     # return name/Path
-    parts = string.split(":", 1)
+    # TODO: SYNTAX_2025: must be fixed here.
+    parts = string.split(TASK_PATH_NAME_SEPARATOR, 1)
     check_upwards = False
     if len(parts) == 2:
-        _path, task_name = parts
+        if syntax == SYNTAX_2025:
+            task_name, _path = parts
+        else:
+            _path, task_name = parts
         path = Path(_path)
 
         if not task_name:
-            ctx.ui.print(f"Invalid target name {task_name!r} in {string!r}.", error=True)
+            ctx.ui.print(f"Invalid task name {task_name!r} in argument: {string!r}.", error=True)
             sys.exit(-1)
 
-        if path.parts and path.parts[0] == "//":
+        if path.parts and path.parts[0] == ABSOLUTE_WORKSPACE:
             trace("Translate workspace path %s %s", path, ctx.workspace_object.path)
             path = ctx.workspace_object.path.joinpath(*path.parts[1:])
         elif not path.is_absolute():
@@ -827,7 +853,7 @@ def parse_target(ctx, base: Path, string: str, check=True) -> Optional[ResolvedT
             else:
 
                 ctx.ui.print(
-                    f"Makex file does not exist for target specified: {task_name}", error=True
+                    f"Makex file does not exist for task specified: {task_name}", error=True
                 )
                 for check in ctx.makex_file_names:
                     ctx.ui.print(f"- Checked in {path/check}")
@@ -835,13 +861,13 @@ def parse_target(ctx, base: Path, string: str, check=True) -> Optional[ResolvedT
     elif path.is_file():
         if DIRECT_REFERENCES_TO_MAKEX_FILES is False:
             raise Error(
-                f"Direct references to Makex files not permitted. Path to target is not a folder. Got {path}."
+                f"Direct references to Makex files not permitted. Path to task is not a folder. Got {path}."
             )
         file = path
     else:
         raise NotImplementedError(f"Unknown file type {path}")
 
-    return ResolvedTaskReference(task_name, path=file)
+    return TaskReference(task_name, path=file)
 
 
 def main_clean(args, extra):
@@ -852,7 +878,7 @@ def main_clean(args, extra):
     """
     targets = args.targets
 
-    to_clean: list[tuple[ResolvedTaskReference, Path]] = []
+    to_clean: list[tuple[TaskReference, Path]] = []
 
     if targets:
         for target in targets:
@@ -1040,10 +1066,11 @@ def main_targets(args, extra_args):
 
     path = args.path
 
+    # TODO: SYNTAX_2025: fix here.
     target_name = None
     if path:
-        if path.find(":") > -1:
-            path, target_name = path.rsplit(":", 1)
+        if path.find(TASK_PATH_NAME_SEPARATOR) > -1:
+            path, target_name = path.rsplit(TASK_PATH_NAME_SEPARATOR, 1)
 
         if path.startswith("//"):
             _path = ctx.workspace_path / path[2:]
@@ -1088,7 +1115,7 @@ def main_targets(args, extra_args):
             #workspace_path = target.path_input().resolved.relative_to(target.workspace.path)
             print(f"REL:{cwd_relative_path}:{name}", end=end)
         elif args.paths is None:
-            print(f"{prefix}{name}", end=end)
+            print(format_locator(name, syntax=ctx.makex_syntax_version), end=end)
 
 
 def _yield_targets(ctx, file, graph):
@@ -1141,19 +1168,31 @@ def main_complete(args, extra_args):
 
     string = args.string or ""
 
-    parts = string.rsplit(":", 1)
+    parts = string.rsplit(TASK_PATH_NAME_SEPARATOR, 1)
 
     target_name = ""
 
     has_target_marker = False
     if len(parts) == 2:
-        path, target_name = parts
+        if ctx.makex_syntax_version == SYNTAX_2025:
+            target_name, path = parts
+        else:
+            path, target_name = parts
         has_target_marker = True
     else:
-        path = parts[0]
+        if ctx.makex_syntax_version == SYNTAX_2025:
+            path = parts[0]
+        else:
+            target_name = parts[0]
+            path = cwd
 
     def escape_print(string):
         print(f'''{string}''')
+
+    # TODO: SYNTAX_2025: fix here.
+    def print_task(name, path=None):
+        locator = format_locator(name, path)
+        print(locator)
 
     escape_print(f"mark:{string.replace('/','__')}")
     if not path:
@@ -1162,12 +1201,12 @@ def main_complete(args, extra_args):
             for name, target in _find_makefile_and_yield(ctx, cwd):
                 if has_target_marker:
                     if name.startswith(target_name):
-                        escape_print(f":{name}")
+                        print_task(name)
                 else:
-                    escape_print(f":{name}")
+                    print_task(name)
         else:
             for name, target in _find_makefile_and_yield(ctx, cwd):
-                escape_print(f":{name}")
+                print_task(name)
         # checking the cwd
         #print(f":NOPATH_TARGETS-{target}-{len(target)}")
 
@@ -1177,8 +1216,9 @@ def main_complete(args, extra_args):
             for entry in sorted(os.scandir(cwd), key=lambda x: x.name):
                 if not entry.is_dir():
                     continue
-                escape_print(f"{entry.name}")
+                print_task(f"{entry.name}")
     elif path.startswith("//"):
+
         workspace_path_string = path[2:]
         normalized_path = normpath(workspace_path_string)
         has_ending_slash = workspace_path_string.endswith("/") is True
@@ -1204,9 +1244,9 @@ def main_complete(args, extra_args):
                     for name, target in _find_makefile_and_yield(ctx, workspace_absolute_path):
                         if has_target_marker:
                             if name.startswith(target_name):
-                                escape_print(f"{target_prefix}:{name}")
+                                print_task(name, target_prefix)
                         else:
-                            escape_print(f"{target_prefix}:{name}")
+                            print_task(name, target_prefix)
 
                 if is_root is False and target_prefix:
                     escape_print(f"{target_prefix}/")
@@ -1257,9 +1297,9 @@ def main_complete(args, extra_args):
                 for name, target in _find_makefile_and_yield(ctx, absolute_path):
                     if has_target_marker:
                         if name.startswith(target_name):
-                            escape_print(f"{target_prefix}:{name}")
+                            print_task(name, target_prefix)
                     else:
-                        escape_print(f"{target_prefix}:{name}")
+                        print_task(name, target_prefix)
 
             if has_ending_slash or is_root:
                 # list the specific subdirectory
@@ -1297,9 +1337,9 @@ def main_complete(args, extra_args):
                 for name, target in _find_makefile_and_yield(ctx, absolute_path):
                     if has_target_marker:
                         if name.startswith(target_name):
-                            escape_print(f"{target_prefix}:{name}")
+                            print_task(name, target_prefix)
                     else:
-                        escape_print(f"{target_prefix}:{name}")
+                        print_task(name, target_prefix)
             else:
                 for entry in _scandir_check_prefix(absolute_path_parent, absolute_path.name):
                     escape_print(f"{entry.name}")
@@ -1374,7 +1414,7 @@ def main_run(args, extra_args):
 
     ctx = init_context_standard(cwd, args)
 
-    #debug("Current environment: %s", pformat(os.environ.__dict__, indent=2))
+    debug("Current content: %s", ctx)
 
     targets = []
 
@@ -1400,24 +1440,26 @@ def main_run(args, extra_args):
         t = graph.get_target(target)
         if t is None:
             ctx.ui.print(
-                f"Task \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path}",
+                f"Task \"{ctx.colors.BOLD}{target.name}{ctx.colors.RESET}\" not found in {target.path!r}",
                 error=True
             )
             sys.exit(-1)
 
         targets_to_run.append(t)
 
-    ctx.ui.print(f"Executing {len(targets_to_run)} targets...")
+    ctx.ui.print(f"Executing {len(targets_to_run)} tasks...")
 
-    if True:
-        for target in targets_to_run:
-            input = target.path_input()
+    # TODO: SYNTAX_2025: fix here
+    for target in targets_to_run:
+        input = target.path_input()
 
-            if input.is_relative_to(ctx.workspace_path):
-                input = input.relative_to(ctx.workspace_path)
-                ctx.ui.print(f"- //{input}:{target.name}")
-            else:
-                ctx.ui.print(f"- //{input}:{target.name}")
+        if input.is_relative_to(ctx.workspace_path):
+            input = input.relative_to(ctx.workspace_path)
+            input = ABSOLUTE_WORKSPACE + input.as_posix()
+            ctx.ui.print(f"- {format_locator(target.name, input, syntax=ctx.makex_syntax_version)}")
+        else:
+            input = ABSOLUTE_WORKSPACE + input.as_posix()
+            ctx.ui.print(f"- {format_locator(target.name, input, syntax=ctx.makex_syntax_version)}")
 
     # XXX: Currently set to one to avoid much breakage. Things are fast enough, for now.
     workers = args.cpus
@@ -1450,7 +1492,7 @@ def main_run(args, extra_args):
 COMMANDS = {
     "run": main_run,
     "path": main_get_path,
-    "targets": main_targets,
+    "tasks": main_targets,
     "workspace": main_workspace,
     "complete": main_complete,
     "completions": main_completions,
@@ -1500,11 +1542,11 @@ def main():
             profiler.enable()
         elif args.profile_mode == "yappi":
             import yappi
-            yappi.set_clock_type("cpu") # Use set_clock_type("wall") for wall time
+            yappi.set_clock_type("wall") # Use set_clock_type("wall") for wall time
             yappi.start()
 
     try:
-        if ":" in args.command:
+        if TASK_PATH_NAME_SEPARATOR in args.command:
             # handle running a target with the second argument to makex
             # e.g. makex :target
             function = main_run
@@ -1525,7 +1567,7 @@ def main():
                 if args.profile_mode == "cprofile":
                     profiler.dump_stats(profile_output)
                 elif args.profile_mode == "yappi":
-                    if profile_output.name.startswith("callgrind."):
+                    if profile_output.name.endswith(".callgrind"):
                         yappi.get_func_stats().save(profile_output, "callgrind")
                     else:
                         yappi.get_func_stats().save(profile_output, "pstat")

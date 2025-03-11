@@ -1,9 +1,7 @@
 import ast
-import logging
 import re
 import types
 import typing
-from dataclasses import dataclass
 from io import StringIO
 from itertools import chain
 from os.path import expanduser
@@ -22,11 +20,17 @@ from makex._logging import (
     debug,
     trace,
 )
+from makex.actions.archive import Archive
+from makex.actions.erase import Erase
+from makex.actions.shell import Shell
+from makex.actions.write import Write
 from makex.build_path import get_build_path
 from makex.constants import (
     ENVIRONMENT_VARIABLES_IN_GLOBALS_ENABLED,
     HASH_USED_ENVIRONMENT_VARIABLES,
     OUTPUT_DIRECTLY_TO_CACHE,
+    SYNTAX_2024,
+    SYNTAX_2025,
 )
 from makex.context import Context
 from makex.errors import (
@@ -47,22 +51,20 @@ from makex.flags import (
     IMPORT_ENABLED,
     INCLUDE_ENABLED,
     LATE_JOINED_STRINGS,
+    MAKEX_SYNTAX_VERSION,
     NAMED_OUTPUTS_ENABLED,
     OPTIONAL_REQUIREMENTS_ENABLED,
     TARGET_PATH_ENABLED,
     TASK_SELF_ENABLED,
 )
+from makex.locators import parse_task_reference
 from makex.makex_file_actions import (
-    Archive,
     Copy,
-    Erase,
     Execute,
-    InternalActionBase,
+    InternalAction,
     Mirror,
     Print,
     SetEnvironment,
-    Shell,
-    Write,
 )
 from makex.makex_file_ast import (
     InsertAST,
@@ -73,7 +75,6 @@ from makex.makex_file_ast import (
 from makex.makex_file_paths import (
     create_build_path_object,
     join_string_nopath,
-    parse_task_reference,
     resolve_path_element_workspace,
     resolve_path_parts_workspace,
     resolve_string_path_workspace,
@@ -111,11 +112,13 @@ from makex.makex_file_types import (
     FindFiles,
     Glob,
     ListTypes,
+    MultiplePathLike,
     PathElement,
     PathLikeTypes,
     RegularExpression,
-    ResolvedTaskReference,
+    TaskOutputsReference,
     TaskPath,
+    TaskReference,
     TaskReferenceElement,
     TaskSelfInput,
     TaskSelfName,
@@ -142,7 +145,7 @@ from makex.python_script import (
 )
 from makex.target import (
     ArgumentData,
-    EvaluatedTask,
+    Task,
     format_hash_key,
     target_hash,
 )
@@ -252,7 +255,7 @@ def make_hash_from_dictionary(d: dict[str, str]):
     flatten = []
     for k, v in d.items():
         flatten.append(k)
-        if isinstance(v, list):
+        if isinstance(v, ListTypes):
             flatten.extend(v)
         else:
             flatten.append(v)
@@ -261,10 +264,10 @@ def make_hash_from_dictionary(d: dict[str, str]):
 
 
 class ActionElementProtocol(Protocol):
-    def transform_arguments(self, ctx: Context, target: EvaluatedTask) -> ArgumentData:
+    def transform_arguments(self, ctx: Context, target: Task) -> ArgumentData:
         ...
 
-    def run_with_arguments(self, ctx: Context, target: EvaluatedTask, arguments) -> CommandOutput:
+    def run_with_arguments(self, ctx: Context, target: Task, arguments) -> CommandOutput:
         raise NotImplementedError
 
 
@@ -280,7 +283,11 @@ class TaskObject:
     inputs: dict[Union[None, str], AllPathLike]
 
     # All outputs as a list. For fast checks if a task has any outputs
-    outputs: list[Union[PathElement, TaskPath]]
+    outputs: Union[
+        StringValue,
+        list[Union[PathElement, TaskPath]],
+        dict[StringValue, Union[PathElement, TaskPath]],
+    ]
 
     # named outputs dict
     # None key is unnamed outputs
@@ -299,7 +306,7 @@ class TaskObject:
     location: FileLocation
 
     # A list of required tasks we've actually resolved to a defined task.
-    resolved_requires: list[ResolvedTaskReference]
+    resolved_requires: list[TaskReference]
 
     # Any requirements keys that are missing (and optional).
     # we keep all requirements as defined, and this set allows us to know which ones haven't been found so we may skip them
@@ -377,7 +384,7 @@ class TaskObject:
             else:
                 yield v
 
-    def add_resolved_requirement(self, requirement: ResolvedTaskReference):
+    def add_resolved_requirement(self, requirement: TaskReference):
         self.resolved_requires.append(requirement)
 
     @property
@@ -389,7 +396,7 @@ class TaskObject:
         return self.makex_file.directory
 
     def __eq__(self, other):
-        if not isinstance(other, (TaskObject, ResolvedTaskReference)):
+        if not isinstance(other, (TaskObject, TaskReference)):
             return False
 
         return self.key() == other.key()
@@ -536,54 +543,31 @@ def _process_output(
     # Mostly return the outputs, as is, for later evaluation. Check for invalid arguments early.
     if isinstance(output, StringValue):
         return PathElement(output, location=output.location)
-    elif isinstance(output, Glob):
-        # append glob as is. we'll resolve later.
-        return output
-    elif isinstance(output, TaskPath):
-        return output
-    elif isinstance(output, PathElement):
+    elif isinstance(output, (Glob, PathElement, TaskSelfPath, TaskPath)):
+        # Append as is. we'll resolve later.
         return output
     else:
         raise PythonScriptError(
-            f"Invalid output type {type(output)} in output list for task {target_name}: {output}",
+            f"Invalid output type {type(output)} in output list for task {target_name}: {output!r}",
             location
         )
 
 
-if typing.TYPE_CHECKING:
-
-    from typing_extensions import (
-        NotRequired,
-        Required,
-    )
-
-    # TODO: remove this in the future when >=3.12 is expected
-    class TargetArguments(TypedDict):
-        name: str
-        label: str
-        path: NotRequired[Path]
-        requires: NotRequired[list[str]]
-        runs: NotRequired[list]
-        actions: NotRequired[list]
-        outputs: NotRequired[list]
-        inputs: NotRequired[dict]
-        location: Required[FileLocation]
-
-    #**kwargs: Unpack[TargetArguments]
-    # NotRequired
-    #
-else:
-
-    class TargetArguments(TypedDict):
-        name: str
-        label: str
-        path: Path
-        requires: list[str]
-        runs: list
-        actions: list
-        outputs: list
-        inputs: dict
-        location: FileLocation
+class TaskKeywordArguments(TypedDict):
+    name: StringValue
+    labels: list[StringValue]
+    constraints: list[StringValue]
+    path: Path
+    requires: list[MultiplePathLike]
+    steps: list[ActionElementProtocol]
+    outputs: Union[
+        MultiplePathLike,
+        PathLikeTypes,
+        dict[str, Union[MultiplePathLike, PathLikeTypes]],
+    ]
+    inputs: dict[str, Union[MultiplePathLike, PathLikeTypes]]
+    location: FileLocation
+    environment: dict[StringValue, StringValue]
 
 
 class MakexFileScriptEnvironment(ScriptEnvironment):
@@ -612,7 +596,10 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         stack: Optional[list[str]] = None, # stack of paths reaching the file
         include_function: Optional[IncludeFunction] = None,
         globals=None,
+        version=MAKEX_SYNTAX_VERSION,
     ):
+        # TODO: SYNTAX_2025: switch this to v2 once ready.
+        self._syntax = version
         self.stack = stack or [path.as_posix()]
 
         self.directory = directory
@@ -665,8 +652,8 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             "Environment": self.environment, #"pattern": wrap_script_function(self._pattern),
             "ENVIRONMENT": self.environment, # TODO: deprecate this:
             "E": self.environment,
-            "Task": wrap_script_function(self._function_task),
-            MAKEX_FUNCTION_TASK: wrap_script_function(self._function_task),
+            "Task": self._function_task,
+            MAKEX_FUNCTION_TASK: self._function_task,
             _TARGET_REFERENCE_NAME: wrap_script_function(self._function_Reference),
             _MACRO_DECORATOR_NAME: self._decorator_macro, #"macro": Decorator,
         }
@@ -684,8 +671,8 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                 # cache is a bit shorter than task_path
                 "cache": wrap_script_function(self._function_task_path),
                 #"output": wrap_script_function(self.build_path),
-                "Path": wrap_script_function(self._function_Path, _deprecate=True),
-                MAKEX_FUNCTION_PATH: wrap_script_function(self._function_Path),
+                "Path": wrap_script_function(self._function_path, _deprecate=True),
+                MAKEX_FUNCTION_PATH: wrap_script_function(self._function_path),
                 MAKEX_FUNCTION_SOURCE: wrap_script_function(self._function_source),
             }
         )
@@ -708,7 +695,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         }
 
         if ARCHIVE_FUNCTION_ENABLED:
-            _actions[MAKEX_FUNCTION_ARCHIVE] = wrap_script_function(self._function_archive)
+            _actions[MAKEX_FUNCTION_ARCHIVE] = self._function_archive
 
         if EXPAND_FUNCTION_ENABLED:
             _actions[MAKEX_FUNCTION_EXPAND] = wrap_script_function(self._function_expand)
@@ -717,7 +704,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             _actions[MAKEX_FUNCTION_HOME] = wrap_script_function(self._function_home)
 
         if ERASE_FUNCTION_ENABLED:
-            _actions[MAKEX_FUNCTION_ERASE] = wrap_script_function(self._function_erase)
+            _actions[MAKEX_FUNCTION_ERASE] = self._function_erase
 
         if OPTIONAL_REQUIREMENTS_ENABLED:
             _actions["optional"] = wrap_script_function(self._function_optional)
@@ -740,15 +727,32 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                 }
             )
 
+        _actions["makex"] = wrap_script_function(self._function_makex)
+
+        _actions["task_outputs"] = wrap_script_function(self._function_task_outputs)
+
         g.update(_actions)
 
         return g
 
-    @dataclass
-    class MacroContext:
-        target: Callable
-        path: Callable
-        source: Callable
+    def _function_makex(self, syntax, location=None, **kwargs):
+        """
+        This will allow switching the makex internal version mid file; changing how locators are parsed from this file.
+        
+        :param version: 
+        :return: 
+        """
+        debug(f"Set syntax version: {syntax}")
+        self._syntax = syntax
+        if syntax == SYNTAX_2024:
+            self.ctx.ui.warn(
+                f"Makex File is using version {SYNTAX_2024} syntax. This will be deprecated soon. See the documentation at https://meta.company/go/makex/breaking-changes",
+                location
+            )
+        elif syntax == SYNTAX_2025:
+            pass
+        else:
+            raise PythonScriptError(f"Unknown syntax type: {syntax!r}", location)
 
     def _decorator_macro(self, fn, _location1_=None):
         # @macro decorator implementation
@@ -775,15 +779,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         #import inspect
         #inspect.stack()[1][0].f_globals.update()
         return f
-
-    if False:
-
-        def has_global(self, name):
-            print("check has global", name)
-            return name in self._globals
-
-        def get_global(self, name):
-            return self._globals.get(name)
 
     def _function_include(
         self,
@@ -884,6 +879,10 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         # absorb kwargs so we can error between Target and target
         if path is None:
             path = self.makex_file.directory
+
+        self.ctx.ui.warn(
+            "`Reference` function deprecated. Switch to `reference`.", location=location
+        )
         return TaskReferenceElement(
             name=name,
             path=StringValue(path, location=location),
@@ -891,7 +890,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         )
 
     def _function_optional(
-        self, reference: Union[StringValue, TaskReferenceElement], location, **kwargs
+        self, reference: Union[StringValue, TaskReferenceElement], location=None, **kwargs
     ):
         if isinstance(reference, StringValue):
             if task_reference := parse_task_reference(reference):
@@ -932,18 +931,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
     def _function_task_self_outputs(self, name: StringValue, location=None, **kwargs):
         return TaskSelfOutput(name, location=location)
 
-    def _function_path(
-        self,
-        *args,
-        **kwargs,
-    ):
-        location = kwargs.get("location", "")
-
-        self.ctx.ui.warn(
-            f"The path() function is deprecated. Please change to using task_path() instead. {location}"
-        )
-        return self._function_task_path(*args, **kwargs)
-
     def _function_task_path(
         self,
         name,
@@ -972,6 +959,20 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             location=location,
             ref_path=ref_path,
         )
+
+    def _function_task_outputs(
+        self, task: StringValue, path: StringValue = None, location=None, **kwargs
+    ):
+        if path is not None:
+            resolved = resolve_string_path_workspace(
+                ctx=self.ctx, workspace=self.workspace, element=path, base=self.directory
+            )
+            _path = PathElement(path, resolved=resolved, location=location)
+        else:
+            _path = PathElement(*self.directory.parts, resolved=self.directory, location=location)
+
+        task = TaskReferenceElement(task, _path, location=location)
+        return TaskOutputsReference(task=task, location=location)
 
     def _function_source(self, *path: StringValue, location=None):
         if not path:
@@ -1014,7 +1015,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         # XXX: all of _path.parts is used, so it's fully absolute
         return PathElement(*path, resolved=_path, location=location)
 
-    def _function_Path(self, *path: StringValue, location=None, **kwargs):
+    def _function_path(self, *path: StringValue, location=None, **kwargs):
         for part in path:
             if not isinstance(part, StringValue):
                 raise PythonScriptError(
@@ -1042,15 +1043,32 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME, None)
         if args:
             raise PythonScriptError(
-                "archive() function must be called with keyword arguments only.", location
+                "archive() action must be called with keyword arguments only.", location
             )
 
         path = kwargs.pop("path", None)
         root = kwargs.pop("root", None)
+
+        if root:
+            self.ctx.ui.warn("archive `root` parameter deprecated. remove it.", location=location)
+
         type = kwargs.pop("type", None)
         options = kwargs.pop("options", None)
         prefix = kwargs.pop("prefix", None)
+
         files = kwargs.pop("files", None)
+        if files:
+            self.ctx.ui.warn(
+                "archive `files` parameter deprecated. use archive.items.", location=location
+            )
+        else:
+            files = kwargs.pop("items", None)
+
+        if kwargs:
+            raise PythonScriptError(
+                f"Unknown arguments to archive(): {list(kwargs.keys())}", location
+            )
+
         return Archive(
             path=path,
             root=root,
@@ -1086,6 +1104,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             args,
             environment=environment,
             location=location,
+            syntax=self._syntax,
         )
 
     def _function_glob(self, glob: str, location=None):
@@ -1131,6 +1150,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             exclude=exclude,
             location=location,
             name=name,
+            syntax=self._syntax,
         )
 
     def _function_erase(self, *paths: tuple[AllPathLike], **kwargs):
@@ -1150,13 +1170,16 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         # keep a set to make sure we report/return unique items as some of them may be added implicitly
         _yielded = set()
 
+        debug("Target requirements using version %r", self._syntax)
+        # TODO: SYNTAX_2025: fix all this:
         for implicit, require in requirements:
             if isinstance(require, StringValue):
-                if task_reference := parse_task_reference(require):
+                if task_reference := parse_task_reference(require, syntax=self._syntax):
                     # parse a requirement string with a task marker. e.g. `//path:task_name`
                     # if the path can be resolved, do it now.
                     rpath, target = task_reference
 
+                    debug("parsed task ref from string %s %s", task_reference, self._syntax)
                     if not rpath:
                         # received :task_name
                         rpath = None
@@ -1198,11 +1221,41 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     _yielded.add(ref)
                     yield ref
                 else:
-                    # convert strings to paths
-                    p = resolve_string_path_workspace(
-                        self.ctx, self.workspace, require, self.directory
-                    )
-                    yield PathElement(require, resolved=p, location=require.location)
+                    # TODO: SYNTAX_2025: verify all this:
+                    if self._syntax == SYNTAX_2025:
+                        debug("Fix path %s", self.path.parts)
+                        # XXX: Use new syntax. All strings are task references
+                        rpath = PathElement(
+                            *self.directory.parts,
+                            resolved=self.directory,
+                            location=require.location
+                        )
+                        ref = TaskReferenceElement(require, rpath, location=require.location)
+
+                        if ref in _yielded:
+                            continue
+
+                        if implicit:
+                            self._implicit_error(
+                                f"Implicit requirement added to: {ref}", require.location
+                            )
+
+                            # TODO: pass task path/name here so we can info the user.
+                            debug(
+                                "Adding implicit requirement: %s to task %s from %s",
+                                ref,
+                                task_name,
+                                require.location
+                            )
+
+                        _yielded.add(ref)
+                        yield ref
+                    else:
+                        # convert strings to paths
+                        p = resolve_string_path_workspace(
+                            self.ctx, self.workspace, require, self.directory
+                        )
+                        yield PathElement(require, resolved=p, location=require.location)
 
             elif isinstance(require, TaskReferenceElement):
                 # yield references which will be followed later
@@ -1265,14 +1318,16 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     f"Invalid type {type(require)} in requires list. Got {require!r}.", location
                 )
 
-    # Unpack[TargetArguments],
+    # Unpack[TaskKeywordArguments],
     def _function_task(
         self,
         *args,
-        **kwargs: TargetArguments,
+        **kwargs: TaskKeywordArguments,
     ):
-        location = kwargs.pop("location", None)
 
+        location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME, None)
+
+        debug("TEST: %s", location)
         if args:
             raise PythonScriptError(
                 "task() function must be called with keyword arguments only.", location
@@ -1305,14 +1360,10 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         name: Optional[StringValue] = kwargs.pop("name", None)
         path = kwargs.pop("path", None)
         requires = kwargs.pop("requires", None)
-        steps: Optional[list[InternalActionBase]] = (
-            kwargs.pop("actions", None) or kwargs.pop("steps", None)
-        )
+        steps: Optional[list[InternalAction]] = kwargs.pop("steps", None)
         outputs = kwargs.pop("outputs", None)
         environment = kwargs.pop("environment", None)
         labels = kwargs.pop("labels", None)
-
-        # TODO: process the inputs dictionary/list
         inputs = kwargs.pop("inputs", None)
 
         if kwargs:
@@ -1354,20 +1405,18 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         else:
             _requires = []
 
-        _outputs = []
-
-        # unnamed outputs go in None
-        outputs_dict: dict[Union[str, None], PathLikeTypes] = {None: []}
-        unnamed_outputs = outputs_dict.get(None)
+        # Process the inputs dictionary/list:
         inputs_mapping = {}
 
         #_outputs2: dict[tuple[Union[str, None], int], PathLikeTypes] = {}
         if inputs:
             if isinstance(inputs, ListTypes):
-                raise PythonScriptError(
-                    message=f"Invalid inputs type {type(outputs)}. Should be a dictionary/mapping.",
-                    location=location
-                )
+                inputs_mapping[None] = inputs
+                if False:
+                    raise PythonScriptError(
+                        message=f"Invalid inputs type {type(outputs)}. Should be a dictionary/mapping.",
+                        location=location
+                    )
             elif isinstance(inputs, dict):
                 for k, value in inputs.items():
                     output = value #_process_output(value, name, location)
@@ -1379,6 +1428,14 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     message=f"Invalid inputs type {type(inputs)}. Should be a dictionary/mapping.",
                     location=location
                 )
+
+        # Process the outputs:
+
+        _outputs = []
+        # unnamed outputs go in None
+        outputs_dict: dict[Union[str, None], PathLikeTypes] = {None: []}
+        unnamed_outputs = outputs_dict.get(None)
+
         if outputs:
             if isinstance(outputs, ListTypes):
                 # outputs was declared as a list
@@ -1388,10 +1445,13 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
                     unnamed_outputs.append(output)
                     outputs_dict[i] = output
                     #_outputs2[(None, i)] = outputs
-            elif isinstance(outputs, (JoinedString, StringValue, PathElement, TaskPath)):
+            elif isinstance(
+                outputs, (JoinedString, StringValue, PathElement, TaskPath, TaskSelfPath)
+            ):
                 # outputs=path or outputs=string
-                _outputs.append(outputs)
-                unnamed_outputs.append(outputs)
+                _output = _process_output(outputs, name, location)
+                _outputs.append(_output)
+                unnamed_outputs.append(_output)
 
                 #_outputs2[(None, 0)] = outputs
             elif NAMED_OUTPUTS_ENABLED and isinstance(outputs, dict):
@@ -1427,7 +1487,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         )
 
         self.targets[name] = task
-        trace("Registered task %s in makexfile %s. %s ", task.name, self.makex_file, location)
+        trace("Registered task %r in makexfile: %s ", task.name, location)
         return None
 
 
@@ -1442,7 +1502,15 @@ class MakexFile(MakexFileProtocol):
     #code: Optional[types.CodeType] = None
     includes: list[MakexFileProtocol]
 
-    def __init__(self, ctx, path: Path, targets=None, variables=None, checksum: str = None):
+    def __init__(
+        self,
+        ctx,
+        path: Path,
+        targets=None,
+        variables=None,
+        checksum: str = None,
+        syntax=MAKEX_SYNTAX_VERSION,
+    ):
         self.ctx = ctx
         self.path = path
         self.directory = path.parent
@@ -1455,6 +1523,7 @@ class MakexFile(MakexFileProtocol):
         # list of paths this MakexFile imports or includes.
         # Included in hash.
         self.includes = []
+        self.syntax = syntax
 
     def hash_components(self):
         yield f"version:{VERSION}"
@@ -1510,7 +1579,13 @@ class MakexFile(MakexFileProtocol):
         checksum_str = str(checksum)
 
         # TODO: this needs to be refactored. we should create the makefile last.
-        makefile = cls(ctx, path, checksum=checksum_str)
+        # TODO: SYNTAX_2025: verify this.
+        makefile = cls(
+            ctx,
+            path,
+            checksum=checksum_str,
+            syntax=ctx.makex_syntax_version,
+        )
 
         env = MakexFileScriptEnvironment(
             ctx,
@@ -1520,7 +1595,8 @@ class MakexFile(MakexFileProtocol):
             targets=makefile.targets,
             macros=makefile.macros,
             workspace=workspace,
-            include_function=include_function
+            include_function=include_function,
+            version=ctx.makex_syntax_version,
         )
 
         # reuse the globals, except for the one that defines a macro

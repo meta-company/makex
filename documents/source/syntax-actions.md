@@ -1,7 +1,7 @@
 
 # Actions
 
-Each task can accept a list of "Actions" that are run when the task is executed.
+Each Task can accept a list of "Actions" that are run when the Task is executed.
 
 For example:
 
@@ -35,8 +35,8 @@ task(
   
   Any arguments which evaluate to None will not be included when running the executable.
   
-  To execute the output of another Task, you must specify the task name and path of the Task (for example, `execute("//path:task_name", ...)`). 
-  See {ref}`Tasks as executables<tasks-as-executables>` for more information. 
+  To execute the output of another Task, you must specify the task name and path of the Task (for example, :code:`execute("//path:task_name", ...)` ). 
+  See :ref:`Tasks as executables<tasks-as-executables>` for more information. 
   
   .. note:: 
   
@@ -149,9 +149,9 @@ copy(file, file)
 
 
 ```{eval-rst}
-.. py:function:: mirror(paths, destination=None, /)
+.. py:function:: mirror(items, destination=None, /)
   
-  Mirrors files to the destination.
+  Mirrors files/folders to the destination.
   
   If `destination` is a relative path, it will be resolved relative to the Task's output path; this may be used to prefix items in the output.
   Any directories specified in `destination` (by using a directory separator) will be created before copying.
@@ -160,13 +160,13 @@ copy(file, file)
   
   If the destination doesn't exist, it will be created.
   
-  Files/folder relative to the task will be mirrored in a relative manner. 
+  Files/folders relative to the Task will be mirrored in a relative manner. 
   
   .. An Execution error will be raised if the destination exists, and it is not a directory.
   
   :param Union[PathLike,list[PathLike]] paths: Paths to the file(s) or folder(s) to copy. Relative paths are resolved relative to the makex file.
   
-  :param PathLike destination: The destination. May be a path relative to the task output path, or an absolute path.
+  :param PathLike destination: The destination. May be a path relative to the Task output path, or an absolute path.
 ```
 
 ```{note}

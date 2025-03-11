@@ -24,6 +24,7 @@
 
 .. toctree::
    :maxdepth: 1
+   :titlesonly:
     
    install
    cli
@@ -45,6 +46,7 @@
    :maxdepth: 1
    :hidden:
    
+   breaking/20250301.md
    build
    syntax
    examples

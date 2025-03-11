@@ -7,7 +7,7 @@ Currently, we have a `@macro` decorator to define/export a macro, and the file d
 
 The dependency on the `include` function is an issue, as we may want to disable/remove the include function. `include` is a goofy construct, likely prone to error or confusion.
 
-As an improvement to referring or calling macros, we may want to use a twist on our task query/selection syntax (`//path:macro_name`).
+As an improvement to referring or calling macros, we may want to use a twist on our Task query/selection syntax (`//path:macro_name`).
 
 For example, calling a `macro()` function defined in a file called `macros.mx` in the root of the Workspace:
 
@@ -17,7 +17,7 @@ call(`//macros.mx:macro`, **kwargs)
 
 ```
 
-Obviously, macros must not conflict with possible task names. This is unlikely if the macros are defined in a separate file, but may happen if a macro is used in the same file as it is defined.
+Obviously, macros must not conflict with possible Task names. This is unlikely if the macros are defined in a separate file, but may happen if a macro is used in the same file as it is defined.
 An argument to the macro function may be used to define/redefine the exported name.
 
 This doesn't really change performance much. As an optimization we may delay the `call` evaluation until later.

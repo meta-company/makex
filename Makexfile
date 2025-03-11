@@ -8,6 +8,7 @@ Build/Deploy
 - use the upload-documents task to upload the latest version of the documentation.
 
 """
+makex(syntax="2025")
 
 # Python interpreter to use to create a virtual environment:
 PYTHON = "python3"
@@ -16,11 +17,11 @@ VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions (YYYYMMSS[equence]).
-VERSION = "20250102"
+VERSION = "20250301"
 
 CHANGE = Environment.get("CHANGE", "")
 
-PYPROJECT_TOML = source() / "python" / "pyproject.toml"
+PYPROJECT_TOML = source().join("python", "pyproject.toml")
 
 task(
     name="hello-world",
@@ -32,10 +33,13 @@ task(
 task(
     name="documents-html",
     requires=[
-        ":venv",
+        "venv",
+    ],
+    inputs=[
         find("documents/source"),
         find("python"),
         "README.md",
+        "HISTORY.md",
     ],
     outputs=[
         "html/index.html",
@@ -48,7 +52,7 @@ task(
     },
     steps=[
         shell(
-            f"source {VENV}/bin/activate",
+            # f"source {VENV}/bin/activate",
             f"make -e -C documents clean html",
         ),
         print(f"Documents available at file://{self.path}/html/index.html")
@@ -62,7 +66,7 @@ task(
 task(
     name="upload-documents",
     requires=[
-        ":documents-html",
+        "documents-html",
     ],
     steps=[
         execute(
@@ -75,8 +79,10 @@ task(
 task(
     name="source-package",
     requires=[
+        "build-completions",
+    ],
+    inputs=[
         find("python", glob("**/*.py")),
-        ":build-completions",
     ],
     steps=[
         copy("python", exclude=[glob("**requirements*.txt"), glob("**pyproject.toml")]),
@@ -97,8 +103,8 @@ task(
 task(
     name="pypi",
     requires=[
-        ":source-package",
-        ":venv",
+        "source-package",
+        "venv",
     ],
     steps=[
         #shell(
@@ -126,14 +132,17 @@ PEX_ARGS += ["-m", "makex"]
 PEX_ARGS += ["--sh-boot"]
 PEX_ARGS += ["--no-wheel", "--pip-version=latest"]
 PEX_ARGS += ["--requirement", PEX_ROOT / "requirements.txt"]
+PEX_ARGS += ["--inherit-path=fallback"]
+PEX_ARGS += ["--compile", "--exclude", "libcst"]
+
 # XXX: this doesn't work for some reason
 #PEX_ARGS+= ["--interpreter-constraint", "CPython>=3.9"]
 
 task(
     name="install-pex",
     requires=[
-        ":venv", #Reference("venv"),
-        ":source-package",
+        "venv",
+        "source-package",
     ],
     steps=[
         execute(
@@ -191,9 +200,9 @@ task(
 task(
     name="build-completions",
     requires=[
-        ":venv",
-
- # completions may change here:
+        "venv",
+    ],
+    inputs=[
         "python/makex/__main__.py",
     ],
     steps=[
@@ -215,7 +224,9 @@ task(
 
 task(
     name="test",
-    requires=[":venv"],
+    requires=[
+        "venv",
+    ],
     steps=[
         shell(
             f"source {VENV}/bin/activate",
@@ -282,7 +293,7 @@ nuitka_target_command_line(
     APPLICATION_NAME="makex",
     pythonpath=source("python"),
     main=source("python/makex/__main__.py"),
-    requires=[":venv"],
+    requires=["venv"],
     VENV_BIN=VENV_BIN,
     extra=[
         f"--include-package-data=makex.data.completions",
@@ -318,7 +329,7 @@ NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
 task(
     name="nuitka",
     requires=[
-        ":venv",
+        "venv",
     ],
     environment={
         "PYTHONPATH": source("python"),
@@ -331,7 +342,9 @@ task(
 
 task(
     name="publish-documents",
-    requires=[":documents-html"],
+    requires=[
+        "documents-html",
+    ],
     steps=[
         execute(
             "metacompany-upload-documents",
@@ -360,7 +373,9 @@ RPM_SOURCES_FOLDER = task_path("rpm") / "SOURCES"
 
 task(
     name="rpm",
-    requires=[":source-package"],
+    requires=[
+        "source-package",
+    ],
     steps=[
         execute("mkdir", RPM_SOURCES_FOLDER),
         copy("packaging/makex.sh", "SOURCES"),

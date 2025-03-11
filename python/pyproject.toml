@@ -57,6 +57,10 @@ use-xattr = [
 development = [
     "pyproject-requirements"
 ]
+fix = [
+    "libcst",
+    "black",
+]
 build = [
     "build",
     "shtab",
@@ -67,6 +71,7 @@ build = [
 ]
 test = [
     "pytest",
+    "pytest-benchmark",
     "pytest-cov ~=3.0.0",
 ]
 documents = [
@@ -83,7 +88,6 @@ typechecking = [
 
 [project.scripts]
 makex = "makex.__main__:main"
-mx = "makex.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["python"]

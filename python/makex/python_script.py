@@ -50,6 +50,7 @@ GLOBALS_NAME = "_GLOBALS_"
 FILE_LOCATION_NAME = "_LOCATION_"
 FILE_LOCATION_ARGUMENT_NAME = "_location_"
 FILE_LOCATION_ATTRIBUTE = "location"
+SCRIPT_OBJECT_TYPE_NAME = "_NODE_TYPE_"
 
 # set of names to ignore
 IGNORE_NAMES = {
@@ -113,11 +114,11 @@ def get_location(object: HasLocation, default=_SENTINEL) -> Optional[FileLocatio
 
 
 def is_function_call(node: ast.Call, name: str):
-    if isinstance(node, ast_Call) is False:
-        return False
-
-    if isinstance(node.func, ast_Name) and node.func.id == name:
-        return True
+    #if isinstance(node, ast_Call) is False:
+    #    return False
+    if func := getattr(node, "func", None):
+        if isinstance(func, ast_Name) and func.id == name:
+            return True
 
     return False
 
@@ -217,6 +218,46 @@ class PythonScriptFileSyntaxError(PythonScriptFileError):
         super().__init__(wraps, path, location)
 
 
+class BuiltInScriptObject:
+    NONE = 1 << 0
+    BOOLEAN = 1 << 1
+    INTEGER = 1 << 2
+    FLOAT = 1 << 3
+    STRING = 1 << 4
+    JOINED_STRING = 1 << 5
+    LIST = 1 << 6
+    MAPPING = 1 << 7
+
+
+def script_object(type):
+    """
+    Wrap/define an attribute on a class so that it can be identified without using isinstance() everywhere.
+    
+    Type should start at 4096 or greater for user defined types.
+     
+    Bits 0-12 are reserved for builtins.
+    
+    :param cls:
+    :param type: 
+    :return: 
+    """
+    def inner(cls):
+        setattr(cls, SCRIPT_OBJECT_TYPE_NAME, type)
+        return cls
+
+    return inner
+
+
+def get_script_object_type(obj) -> Optional[int]:
+    """
+    Get the node type as defined by the script_node decorator.
+    
+    :param obj: 
+    :return: 
+    """
+    return getattr(obj, SCRIPT_OBJECT_TYPE_NAME, None)
+
+
 def wrap_script_function(f, **extra):
     # wraps a script function to have a location= keyword argument instead of our special hidden one
     def wrapper(*args, **kwargs):
@@ -227,6 +268,7 @@ def wrap_script_function(f, **extra):
 
 
 # TODO: Track other primitive types: None/bool/dict/int/float
+@script_object(type=BuiltInScriptObject.STRING)
 class StringValue(str):
     """
         This is a special type.
@@ -245,14 +287,17 @@ class StringValue(str):
         self.value: str = data
         self.location: FileLocation = location
 
-    def replace(self, *args, _location_=None) -> "StringValue":
-        return StringValue(self.value.replace(*args), location=_location_)
+    def replace(self, *args, **kwargs) -> "StringValue":
+        location = kwargs.get(FILE_LOCATION_ARGUMENT_NAME, None)
+        return StringValue(self.value.replace(*args), location=location)
 
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls, args[0])
 
-    def __add__(self, other):
-        return StringValue(self.value + other.value, getattr(other, "location", self.location))
+    # XXX: disabled to minimize surface
+    # TODO: __add__ with a non-string should return an internal JoinedString
+    #def __add__(self, other):
+    #    return StringValue(self.value + other.value, getattr(other, "location", self.location))
 
     def __hash__(self):
         return hash(self.value)
@@ -265,9 +310,8 @@ class StringValue(str):
         else:
             return False
 
-    # TODO: __add__ with a non-string should return an internal JoinedString
 
-
+@script_object(type=BuiltInScriptObject.JOINED_STRING)
 class JoinedString:
     """
         Special type to allow deferring the evaluation of joined strings (and values inside of them).
@@ -281,17 +325,8 @@ class JoinedString:
         self.parts: list[Any] = parts
         self.location: FileLocation = location
 
-    #def evaluate(self, data=None) -> StringValue:
-    #    # use the variables/functions in data to evaluate the string parts
-    #    return StringValue("".join(self._evaluate(data)), location=self.location)
-    #def _evaluate(self, data):
-    #    for part in self.parts:
-    #        if eval_func := getattr(part, "evaluate", None):
-    #            yield eval_func(data)
-    #        else:
-    #            yield part
 
-
+@script_object(type=BuiltInScriptObject.INTEGER)
 class IntegerValue:
     # XXX: subtypes of int can't have slots. (TypeError: nonempty __slots__ not supported for subtype of 'int')
     __slots__ = ("value", "location")
@@ -347,6 +382,7 @@ class IntegerValue:
         return 'IntegerValue(%s)' % self.value
 
 
+@script_object(type=BuiltInScriptObject.BOOLEAN)
 class BooleanValue:
     __slots__ = ("value", "location")
 
@@ -361,6 +397,7 @@ class BooleanValue:
         return 'BooleanValue(%s)' % self.value
 
 
+@script_object(type=BuiltInScriptObject.NONE)
 class NoneValue:
     def __init__(self, location: FileLocation):
         self.location = location
@@ -620,17 +657,26 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
         self.attributes = None
 
     def visit_Call(self, node: ast.Call):
-        #debug(f"#Transform fileloction {node.func} {type(node.func)} {node.func.ctx} {type(node.func.ctx)}")
+        #if getattr(node.func, 'id', None):
+        #    logging.debug(
+        #        f"#Transform call %s() %s:%s:%s",
+        #        node.func.id,
+        #        self.path,
+        #        node.lineno,
+        #        node.col_offset
+        #    )
+
         func = node.func
 
         if isinstance(func, ast_Attribute):
             attr_name = func.attr
             attr_of = func.value
-            if not (isinstance(attr_of, ast_Name) and isinstance(attr_of.ctx, ast_Load)):
+            if not (isinstance(attr_of, ast_Name) and isinstance(attr_of.ctx, ast_Load)) is False:
                 # could/probably have a str.method e.g. "".join()
                 #for child in ast.iter_child_nodes(node):
                 #    self.generic_visit(child)
-                self.generic_visit(node)
+                logging.debug("Attribute access %s", attr_name)
+                self.generic_visit(attr_of)
                 return node
         elif isinstance(func, ast_Name):
             function_name = func.id
@@ -653,9 +699,11 @@ class _TransformCallsToHaveFileLocation(ast.NodeTransformer):
         node.keywords.append(ast_keyword(arg=FILE_LOCATION_ARGUMENT_NAME, value=file_location))
 
         fix_missing_locations(node)
+
         return node
 
 
+@script_object(type=BuiltInScriptObject.LIST)
 class ListValue:
     """
         This changes the behavior of lists and list comprehensions in python so that + or += means append.
@@ -735,9 +783,6 @@ class _TransformListValues(ast.NodeTransformer):
         self.path = path
 
     def visit_List(self, node):
-        #if len(node.elts) > 0:
-        #    return ast.copy_location(node, node)
-        #return ast.copy_location(ast.NameConstant(value=None), node)
         line = node.lineno
         offset = node.col_offset
 
@@ -755,10 +800,6 @@ class _TransformListValues(ast.NodeTransformer):
             lineno=line,
             col_offset=offset,
         )
-
-        #for child in ast.iter_child_nodes(node):
-        #    self.visit(child)
-
         #ast.fix_missing_locations(_node)
         self.generic_visit(node)
         return _node

@@ -4,7 +4,7 @@ version: "20250101"
 ---
 # Proposal: Task Self References
 
-Provide a keyword to refer to property values and attributes of a task.
+Provide a keyword to refer to property values and attributes of a Task.
 
 
 ## Rationale

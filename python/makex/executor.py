@@ -36,19 +36,21 @@ from makex.errors import (
 )
 from makex.file_checksum import FileChecksum
 from makex.flags import SCHEDULE_DEBUG_ENABLED
+from makex.locators import format_locator
 from makex.makex_file import (
     MakexFileCycleError,
     TaskObject,
     find_makex_files,
     resolve_task_output_path,
 )
-from makex.makex_file_actions import InternalActionBase
+from makex.makex_file_actions import InternalAction
 from makex.makex_file_parser import TargetGraph
 from makex.makex_file_paths import (
     join_string,
     resolve_find_files,
     resolve_glob,
     resolve_path_element_workspace,
+    resolve_pathlike,
     resolve_string_path_workspace,
     resolve_to_string,
 )
@@ -58,11 +60,13 @@ from makex.makex_file_types import (
     ListType,
     ListTypes,
     PathElement,
-    ResolvedTaskReference,
     TaskPath,
+    TaskReference,
     TaskReferenceElement,
+    TaskSelfPath,
 )
 from makex.metadata_sqlite import SqliteMetadataBackend
+from makex.path import PathWithLocation
 from makex.protocols import FileStatus
 from makex.python_script import (
     FileLocation,
@@ -71,9 +75,9 @@ from makex.python_script import (
     StringValue,
 )
 from makex.target import (
-    EvaluatedTask,
+    Action,
     EvaluatedTaskGraph,
-    InternalAction,
+    Task,
     TaskKey,
     format_hash_key,
 )
@@ -132,29 +136,27 @@ def figure_out_location(obj, default):
 
 # TODO: this method should be moved to the makex file module. _resolve_pathlike() fits the bill.
 def _transform_output_to_path(
-    ctx, target, base: Path, value: Union[StringValue, PathElement, TaskPath]
-) -> Path:
+    ctx, target: Task, base: Path, value: Union[StringValue, PathElement, TaskPath]
+) -> PathWithLocation:
     # TODO: we probably won't get any StringValues as they are transformed earlier
-    if isinstance(value, StringValue):
-        path = resolve_string_path_workspace(ctx, target.workspace, value, base)
-    elif isinstance(value, JoinedString):
-        path = resolve_string_path_workspace(
-            ctx, target.workspace, join_string(ctx, target, base, value), base
-        )
-    elif isinstance(value, PathElement):
-        # TODO: we should use the resolved path here
-        path = resolve_path_element_workspace(ctx, target.workspace, value, base)
-    elif isinstance(value, TaskPath):
-        return value.path
-    else:
-        raise NotImplementedError(f"Invalid output type {type(value)}: {value!r}")
+    #if isinstance(value, StringValue):
+    #    path = resolve_string_path_workspace(ctx, target.workspace, value, base)
+    #elif isinstance(value, JoinedString):
+    #    path = resolve_string_path_workspace(
+    #        ctx, target.workspace, join_string(ctx, target, base, value), base
+    #    )
+    #elif isinstance(value, PathElement):
+    # TODO: we should use the resolved path here
+    #    path = resolve_path_element_workspace(ctx, target.workspace, value, base)
+    if isinstance(value, (StringValue, TaskPath, TaskSelfPath, PathElement)):
+        return resolve_pathlike(ctx, target, base, value)
 
-    return path
+    raise NotImplementedError(f"Invalid output type {type(value)}: {value!r}")
 
 
 def _transform_input_to_path(
-    ctx, target, base: Path, value: Union[StringValue, PathElement, TaskPath]
-) -> Path:
+    ctx, target: Task, base: Path, value: Union[StringValue, PathElement, TaskPath]
+) -> PathWithLocation:
     # TODO: we probably won't get any StringValues as they are transformed earlier
     if isinstance(value, StringValue):
         path = resolve_string_path_workspace(ctx, target.workspace, value, base)
@@ -166,14 +168,14 @@ def _transform_input_to_path(
         # TODO: we should use the resolved path here
         path = resolve_path_element_workspace(ctx, target.workspace, value, base)
     elif isinstance(value, TaskPath):
-        return value.path
+        return PathWithLocation(value.path, location=value.location)
     else:
         raise NotImplementedError(f"Invalid input type {type(value)}: {value!r}")
 
     return path
 
 
-ExecuteResult = tuple[list[EvaluatedTask], deque[Exception]]
+ExecuteResult = tuple[list[Task], deque[Exception]]
 _NORMAL_ERROR = (ExecutionError, PythonScriptError, ExternalExecutionError)
 
 
@@ -198,7 +200,7 @@ class Executor:
 
     # local cache/map of target hash mapping to target
     # hashes are created/store after a target has successful completion
-    _target_hash: dict[str, EvaluatedTask]
+    _target_hash: dict[str, Task]
 
     # keeps dictionary of TaskKey -> True if completed/finished
     _target_status: dict[TaskKey, bool]
@@ -212,9 +214,13 @@ class Executor:
     # queue of object we need to write to database. doing this because of sqlite issues...
     # sqlite objects can't be accessed from a different thread, so we'd need to recreate connections per each, or,
     # keep a queue.
-    _database_queue: deque[EvaluatedTask]
+    _database_queue: deque[Task]
 
+    # Tasks we have just executed.
     _executed_keys: set[str]
+
+    # Tasks that have completed successfully
+    _successful_tasks: set[str]
 
     def __init__(self, ctx: "Context", workers=1, force=False, graph=None, analysis=False):
         self.ctx = ctx
@@ -247,11 +253,11 @@ class Executor:
 
         self._reset()
 
-    def _load_target_metadata(self, target: TaskObject) -> EvaluatedTask:
+    def _load_target_metadata(self, target: TaskObject) -> Task:
         # load target information from metadata
         pass
 
-    def _are_dependencies_executed(self, check_target: ResolvedTaskReference):
+    def _are_dependencies_executed(self, check_target: TaskReference):
         try:
             # we don't need to use the cycle checking get_requires here because they've already been loaded into the graph.
             requires = list(self._graph_1.get_requires(check_target))
@@ -263,10 +269,14 @@ class Executor:
         if SCHEDULE_DEBUG_ENABLED:
             trace("Check task requires ready: %s", requires)
 
+        # TODO: use a set here to check for completions
         statuses = []
-        for target in requires:
-            statuses.append(self._target_status.get(target.key(), False))
+        for task in requires:
+            #if task.key() not in self._executed_keys:
+            #    return False
+            statuses.append(self._target_status.get(task.key(), False))
 
+        #return True
         return all(statuses)
 
     def _reset(self):
@@ -289,6 +299,8 @@ class Executor:
         self._hash_cache = {}
 
         self._executed_keys = set()
+
+        self._successful_tasks = set()
 
     def _store_database(self, target):
         if self.ctx.dry_run:
@@ -321,7 +333,7 @@ class Executor:
             if target in self.waiting:
                 continue
 
-            resolved_target = ResolvedTaskReference(
+            resolved_target = TaskReference(
                 target.name, Path(target.makex_file_path), target.location
             )
             if len(target.requires) == 0:
@@ -337,18 +349,16 @@ class Executor:
             else:
                 # add the dependencies of target first, in order
                 # add to waiting so we can fetch them later
-                if True:
-                    # CODE DUPLICATION
-                    trace("Queue recursive deps of %s", resolved_target)
-                    try:
-                        # add all the possible requirements to waiting queue
-                        for req in self._graph_1.get_requires_detect_cycles(
-                            resolved_target, recursive=True
-                        ):
-                            trace("Add to waiting %r", req)
-                            self.waiting.append(req)
-                    except MakexFileCycleError as e:
-                        return [], [e]
+                trace("Queue recursive deps of %s", resolved_target)
+                try:
+                    # add all the possible requirements to waiting queue
+                    for req in self._graph_1.get_requires_detect_cycles(
+                        resolved_target, recursive=True
+                    ):
+                        trace("Add to waiting %r", req)
+                        self.waiting.append(req)
+                except MakexFileCycleError as e:
+                    return [], [e]
 
                 if SCHEDULE_DEBUG_ENABLED:
                     trace("Add to waiting %r", resolved_target)
@@ -357,6 +367,12 @@ class Executor:
 
         trace("waiting: %s", self.waiting)
         i = 0
+
+        # XXX: this sleep time is optimized to peak out the amount tasks we can query/execute per second
+        #  Some amount of sleep is required to not push the cpu unnecessarily.
+        # NOTE: pushing the CPU here will slow down file copying operations among other things.
+        # TODO: sleep and wait instead of polling
+        _SLEEP_TIME = 0.001
         try:
             while self.stop.is_set() is False:
                 # loop until we wait on nothing
@@ -384,14 +400,14 @@ class Executor:
                     debug("target queued. skip: %s", target.key())
                     continue
 
-                if isinstance(target, ResolvedTaskReference):
+                if isinstance(target, TaskReference):
                     resolved_target = self._graph_1.get_target(target)
 
                     if resolved_target is None:
                         #raise Exception(f"Could not find target {target.name} in file {target.path}: {target.location}")
                         self.errors.append(
                             ExecutionError(
-                                f"Could not find task {target.name} in file {target.path}",
+                                f"Could not find task {target.name!r} in file {target.path!r}",
                                 target,
                                 target.location
                             )
@@ -409,7 +425,7 @@ class Executor:
                         self.errors.extend(errors)
                         self.stop.set()
                 else:
-                    resolved_target = ResolvedTaskReference(
+                    resolved_target = TaskReference(
                         target.name, Path(target.makex_file_path), target.location
                     )
                     if self._are_dependencies_executed(resolved_target):
@@ -424,6 +440,8 @@ class Executor:
                             trace("Add back to waiting queue %r", target)
                         self.waiting.append(target)
                 i += 1
+
+                time.sleep(_SLEEP_TIME)
                 #if i == 5:
                 #    print("early break")
                 #    break
@@ -504,7 +522,7 @@ class Executor:
             # filechecksum class handles the caching part
             return FileChecksum.is_fingerprint_valid(path) is False
 
-    def _create_output_link(self, target: EvaluatedTask, cache: Path, fix=False):
+    def _create_output_link(self, target: Task, cache: Path, fix=False):
         # TODO: optimize this upwards so it isn't called for each target. or use a filesystem cache
         # link from src() / "_output_" to cache
         linkpath = target.input_path / self.ctx.output_folder_name
@@ -523,7 +541,8 @@ class Executor:
             if not linkpath.is_symlink():
                 raise ExecutionError(
                     f"Linkpath {linkpath} exists, but it is not a symlink. "
-                    f"Output directory may have been created inadvertantly outside the tool."
+                    f"Output directory may have been created inadvertantly outside the tool.",
+                    target,
                 )
 
             realpath = linkpath.readlink().absolute()
@@ -538,7 +557,8 @@ class Executor:
                         f"Link {linkpath} exists, but it doesn't point to the right place in the cache ({new_path}). "
                         f"The link currently points to {realpath}. "
                         f"Output directory may have been created inadvertantly outside Makex. "
-                        f" Delete or change this link."
+                        f" Delete or change this link.",
+                        target,
                     )
         else:
             # linkpath doesn't exist.
@@ -577,9 +597,11 @@ class Executor:
         status = FileStatus(path, checksum=checksum)
         return status
 
-    def _evaluate_target(self,
-                         target: TaskObject,
-                         destroy_output=False) -> tuple[EvaluatedTask, list[Exception]]:
+    def _evaluate_target(
+        self,
+        target: TaskObject,
+        destroy_output=False,
+    ) -> tuple[Task, list[Exception]]:
         # transform the target object into an evaluated object
         # check the inputs of target are available
         seen = set()
@@ -589,18 +611,29 @@ class Executor:
         #trace("Input path set to %s", target_input_path)
         inputs = []
         # TODO: should be a set
-        requires: list[EvaluatedTask] = []
+        requires: list[Task] = []
         errors = []
 
+        makex_file_version = target.makex_file.syntax
+        files_in_requirements_enabled = ctx.files_in_requirements_enabled
         missing = target.missing_requirements
+        _requires = set()
         # We may have any number of objects passed in target(requires=[]).
-        # Translate them for the EvaluatedTask.
+        # Translate them for the Task.
         # XXX: there's some duplication here with _iterate_makefile_requirements
         # XXX: most of this should be duck-typed with a _evaluate() method on the Element. However,
         #  since nodes are part of the makex file scripting api, we can't just expose hidden methods on objects.
+        # TODO: disallow files in requires
         for node in target.requires:
             #trace("Process requirement %r", node)
             if isinstance(node, PathElement):
+                if files_in_requirements_enabled is False:
+                    raise ExecutionError(
+                        "Paths are not allowed in the `requires` argument. Please move them to the `inputs` argument.",
+                        target=target,
+                        location=node.location,
+                    )
+
                 path = resolve_path_element_workspace(
                     ctx, target.workspace, node, target_input_path
                 )
@@ -622,6 +655,13 @@ class Executor:
                         checksum=checksum,
                     ))
             elif isinstance(node, Glob):
+                if files_in_requirements_enabled is False:
+                    raise ExecutionError(
+                        "`glob()` is not allowed in the `requires` argument. Please move them to the `inputs` argument.",
+                        target=target,
+                        location=node.location,
+                    )
+
                 try:
                     for path in resolve_glob(ctx, target, target_input_path, node):
                         checksum = self._checksum_file(path)
@@ -632,8 +672,14 @@ class Executor:
                         ))
                 except FileNotFoundError as e:
                     raise PythonScriptError(f"Error finding files: {e}", node.location)
-
             elif isinstance(node, FindFiles):
+                if files_in_requirements_enabled is False:
+                    raise ExecutionError(
+                        "`find()` files are not allowed in the `requires` argument. Please move them to the `inputs` argument.",
+                        target=target,
+                        location=node.location,
+                    )
+
                 # find(path, pattern, type=file|symlink)
                 if node.path:
                     path = resolve_path_element_workspace(
@@ -645,7 +691,7 @@ class Executor:
                 # TODO: optimize find
                 i = 0
 
-                debug("Searching for files %s: %s", path, node.pattern)
+                debug("Searching for files %s", path)
                 try:
                     for i, file in enumerate(resolve_find_files(ctx, target, path, node.pattern)):
                         #trace("Checksumming input file %s", file)
@@ -660,13 +706,17 @@ class Executor:
 
                 if i:
                     debug("Found %s files in %s", i, path)
-            elif isinstance(node, StringValue):
+            elif isinstance(node, (JoinedString, StringValue)):
                 # XXX: This shouldn't happen. StringValues should already be transformed.
-                raise NotImplementedError(f"Got {type(node)}: {node}")
+                raise NotImplementedError(
+                    f"Invalid requirement {type(node)}. Should have been transformed: {node!r}"
+                )
             elif isinstance(node, TaskObject):
                 # XXX: reference to an internal target
                 requirement = self.graph_2.get_target(node)
                 requires.append(requirement)
+
+                _requires.add(format_locator(node.name, node.path))
             elif isinstance(node, TaskReferenceElement):
                 # XXX: reference to an external target
                 # translate the target reference and resolve it
@@ -676,11 +726,13 @@ class Executor:
 
                 optional = node.optional
 
+                _requires.add(format_locator(name, path))
+
                 #debug("Evaluate reference %s: %s: %r %s", name, path, path, node.location if path else None)
                 if path is None:
                     # we have a local reference
                     _path = Path(target.makex_file_path)
-                    ref = ResolvedTaskReference(name, _path, location=node.location)
+                    ref = TaskReference(name, _path, location=node.location)
                 elif isinstance(path, StringValue):
                     _path = resolve_string_path_workspace(
                         ctx, target.workspace, path, target_input_path
@@ -707,7 +759,7 @@ class Executor:
                         #stop_and_error(error)
                         raise error
 
-                    ref = ResolvedTaskReference(name, makex_file, location=path.location)
+                    ref = TaskReference(name, makex_file, location=path.location)
                 elif isinstance(path, TaskPath):
                     # XXX: odd case of referring to a build_path in a target reference
                     raise NotImplementedError("")
@@ -737,7 +789,7 @@ class Executor:
                         #stop_and_error(error)
                         raise error
 
-                    ref = ResolvedTaskReference(name, makex_file, location=path.location)
+                    ref = TaskReference(name, makex_file, location=path.location)
                 else:
                     raise NotImplementedError(
                         f"Invalid path in Task Reference. Got {type(path)}: {path}: node={node}"
@@ -769,6 +821,53 @@ class Executor:
 
         inputs_mapping = {}
 
+        if False:
+            # search for any input files from the last run missing in this one
+            for file in self._get_last_input_files(target):
+                if file not in seen:
+                    #errors.append()
+                    inputs.append(
+                        FileStatus(
+                            path=path,
+                            error=ExecutionError("Missing input file: {node}", target),
+                        )
+                    )
+                    #errors.append()
+
+        environment = {}
+
+        if isinstance(target.environment, dict) is False:
+            raise PythonScriptError(
+                message=f"Invalid argument to task.enviroment. Expected mapping, got {type(target.environment)}.",
+                location=figure_out_location(target.environment, target.location),
+            )
+
+        #debug("Pre-eval requires %s", requires)
+        # Create a Evaluated target early, which we can pass to Actions so they can easily create arguments (below).
+        actions: list[Action] = []
+        environment = {}
+        evaluated = Task(
+            name=target.name,
+            path=target_output_path,
+            input_path=target_input_path,
+            inputs=inputs,
+            inputs_mapping=inputs_mapping,
+            outputs=outputs,
+            output_dict=output_dict, # TODO: append these commands in a separate thread
+            actions=actions,
+            # use the existing requires list for performance
+            # we don't need to copy/recreate here because they key/serialize the same
+            requires=requires,
+            location=target.location,
+            cache_path=cache_path,
+            makex_file=target.makex_file,
+            workspace=target.workspace,
+            environment=environment,
+            requires_original=_requires,
+        )
+
+        # XXX: Use the evaluated task to resolve/fill any input defined.
+        #  We must use the evaluated target because it has a valid path property which the path resolver functions expect.
         if target.inputs:
             # inputs: list[FileStatus] = []
             # inputs_dict: dict[str, list[FileStatus]] = {}
@@ -778,7 +877,7 @@ class Executor:
 
                 for file in self._resolve_input_file_paths(
                     ctx=ctx,
-                    task=target,
+                    task=evaluated,
                     task_path=target_input_path,
                     value=path_like,
                 ):
@@ -790,13 +889,15 @@ class Executor:
                     ))
                     inputs_mapping.setdefault(input_name, []).append(file)
 
+        # XXX: Use the evaluated task to resolve/fill any outputs defined.
+        #  We must use the evaluated target because it has a valid path property which the path resolver functions expect.
         if target.outputs:
-            #debug("Rewrite output path %r %r %s", target_output_path, target.path, target)
+            # debug("Rewrite output path %r %r %s", target_output_path, target.path, target)
             # TODO: use a method on TaskObject to get/transform outputs
             for output_name, path_like in target.outputs_dict.items():
                 for status in self._resolve_output_file_statuses(
                     ctx=ctx,
-                    task=target,
+                    task=evaluated,
                     task_path=target_output_path,
                     value=path_like,
                 ):
@@ -836,27 +937,8 @@ class Executor:
                             location=figure_out_location(path_like, target.location),
                         )
 
-        if False:
-            # search for any input files from the last run missing in this one
-            for file in self._get_last_input_files(target):
-                if file not in seen:
-                    #errors.append()
-                    inputs.append(
-                        FileStatus(
-                            path=path,
-                            error=ExecutionError("Missing input file: {node}", target),
-                        )
-                    )
-                    #errors.append()
-
-        environment = {}
-
-        if isinstance(target.environment, dict) is False:
-            raise PythonScriptError(
-                message=f"Invalid argument to task.enviroment. Expected mapping, got {type(target.environment)}.",
-                location=figure_out_location(target.environment, target.location),
-            )
-
+        # XXX: Use the evaluated task to resolve/fill any environment variables defined.
+        #  We must use the evaluated target because it has a valid path property which the path resolver functions expect.
         for k, v in target.environment.items():
             if isinstance(k, StringValue) is False:
                 raise PythonScriptError(
@@ -865,31 +947,9 @@ class Executor:
                 )
 
             try:
-                environment[k] = resolve_to_string(ctx, target, v)
+                environment[k] = resolve_to_string(ctx, evaluated, v)
             except PythonScriptError as e:
                 raise PythonScriptError(f"Invalid value in environment: {e}", location=e.location)
-
-        #debug("Pre-eval requires %s", requires)
-        # Create a Evaluated target early, which we can pass to Actions so they can easily create arguments (below).
-        actions: list[InternalAction] = []
-        evaluated = EvaluatedTask(
-            name=target.name,
-            path=target_output_path,
-            input_path=target_input_path,
-            inputs=inputs,
-            inputs_mapping=inputs_mapping,
-            outputs=outputs,
-            output_dict=output_dict, # TODO: append these commands in a separate thread
-            actions=actions,
-            # use the existing requires list for performance
-            # we don't need to copy/recreate here because they key/serialize the same
-            requires=requires,
-            location=target.location,
-            cache_path=cache_path,
-            makex_file=target.makex_file,
-            workspace=target.workspace,
-            environment=environment
-        )
 
         # TODO: queue target transformation in a separate pool and return a future here (once evaluated)
 
@@ -908,7 +968,7 @@ class Executor:
                 # TODO: check we actually got a Action
                 if isinstance(command, ListTypes):
                     for c in command:
-                        if isinstance(c, InternalActionBase) is False:
+                        if isinstance(c, InternalAction) is False:
                             location = figure_out_location(c, target.location)
 
                             err = PythonScriptError(
@@ -918,11 +978,11 @@ class Executor:
                             raise err
                         else:
                             arguments = c.transform_arguments(ctx, evaluated)
-                            actions.append(InternalAction(c, arguments))
+                            actions.append(Action(c, arguments))
                 elif command is None:
                     # XXX: skip None values in steps/actions lists.
                     continue
-                elif isinstance(command, InternalActionBase) is False:
+                elif isinstance(command, InternalAction) is False:
                     location = figure_out_location(command, target.location)
 
                     err = PythonScriptError(
@@ -932,16 +992,24 @@ class Executor:
                     raise err
                 else:
                     arguments = command.transform_arguments(ctx, evaluated)
-                    actions.append(InternalAction(command, arguments))
+                    actions.append(Action(command, arguments))
 
         return evaluated, errors
 
     def _resolve_output_file_statuses(
         self,
         ctx,
-        task: TaskObject,
+        task: Task,
         task_path: Path,
-        value: Union[ListType, None, StringValue, PathElement, TaskPath],
+        value: Union[
+            ListType,
+            None,
+            StringValue,
+            PathElement,
+            TaskPath,
+            TaskSelfPath,
+            JoinedString,
+        ],
     ) -> Iterable[FileStatus]:
         if isinstance(value, ListTypes):
             for p in value:
@@ -951,7 +1019,7 @@ class Executor:
                     task_path=task_path,
                     value=p,
                 )
-        elif isinstance(value, (StringValue, PathElement, TaskPath, JoinedString)):
+        elif isinstance(value, (StringValue, PathElement, TaskPath, TaskSelfPath, JoinedString)):
             path = _transform_output_to_path(ctx, task, task_path, value)
             trace("Check task output: %s", path)
             yield self._get_output_file_status(path)
@@ -964,10 +1032,12 @@ class Executor:
     def _resolve_input_file_paths(
         self,
         ctx,
-        task: TaskObject,
+        task: Task,
         task_path: Path,
         value: Union[ListType, None, StringValue, PathElement, TaskPath],
     ) -> Iterable[Path]:
+        target_input_path = task.input_path
+
         if isinstance(value, ListTypes):
             for p in value:
                 yield from self._resolve_input_file_paths(
@@ -981,6 +1051,32 @@ class Executor:
             trace("Check task output: %s", path)
             #yield self._get_output_file_status(path)
             yield path
+        elif isinstance(value, Glob):
+            try:
+                yield from resolve_glob(ctx, task, target_input_path, value)
+            except FileNotFoundError as e:
+                raise PythonScriptError(f"Error finding files: {e}", value.location)
+
+        elif isinstance(value, FindFiles):
+            # find(path, pattern, type=file|symlink)
+            if value.path:
+                path = resolve_path_element_workspace(
+                    ctx, task.workspace, value.path, target_input_path
+                )
+            else:
+                path = target_input_path
+
+            # TODO: optimize find
+            i = 0
+
+            debug("Searching for files %s", path)
+            try:
+                yield from resolve_find_files(ctx, task, path, value.pattern)
+            except FileNotFoundError as e:
+                raise PythonScriptError(f"Error finding files: {e}", value.location)
+
+            if i:
+                debug("Found %s files in %s", i, path)
         else:
             raise PythonScriptError(
                 message=f"Unknown type in task inputs {type(value)}: {value!r}",
@@ -990,9 +1086,9 @@ class Executor:
     def _produce_internal_actions(
         self,
         ctx,
-        task: EvaluatedTask,
-        action: Union[ListType, None, InternalActionBase],
-    ) -> Iterable[InternalAction]:
+        task: Task,
+        action: Union[ListType, None, InternalAction],
+    ) -> Iterable[Action]:
         """ Take an action or list[action] and produce InternalActions """
         if isinstance(action, ListTypes):
             for c in action:
@@ -1000,7 +1096,7 @@ class Executor:
         elif action is None:
             # XXX: skip None values in steps/actions lists.
             return None
-        elif isinstance(action, InternalActionBase) is False:
+        elif isinstance(action, InternalAction) is False:
             location = figure_out_location(action, task.location)
 
             err = PythonScriptError(
@@ -1010,14 +1106,14 @@ class Executor:
             raise err
         else:
             arguments = action.transform_arguments(ctx, target=task)
-            yield InternalAction(action, arguments)
+            yield Action(action, arguments)
 
     def _memory_has_target(self, hash: str):
         return hash in self._target_hash
 
     def _check_target_dirty(
         self,
-        evaluated: EvaluatedTask,
+        evaluated: Task,
         h=None,
     ) -> tuple[bool, list[Exception]]:
 
@@ -1057,32 +1153,32 @@ class Executor:
         _outputs_checked = False
         # Next, Check if the [shared] disk cache has the target
         if DATABASE_ENABLED:
-            if True: # only check if the in memory is empty
-                db_has_target = self._disk_metadata.has_target(target_key, h)
+            # only check if the in memory is empty
+            db_has_target = self._disk_metadata.has_target(target_key, h)
 
-                # We need to verify the outputs here because it's possible they are missing/screwed up, and we were not the ones who produced the target.
-                if db_has_target is True:
-                    debug(f"Task in database. Checking outputs... (%r, hash=%r).", target_key, h)
+            # We need to verify the outputs here because it's possible they are missing/screwed up, and we were not the ones who produced the target.
+            if db_has_target is True:
+                debug(f"Task in database. Checking outputs... (%r, hash=%r).", target_key, h)
 
-                    if self._check_outputs_stale_or_missing(evaluated, h):
-                        # db has a target produced with the specified hash. outputs are still valid.
-                        debug(f"Task is dirty because the outputs are stale (%r).", target_key)
-                        target_dirty = True
-                    else:
-                        debug(f"Outputs of task are not stale (%r, hash=%r).", target_key, h)
-                        target_dirty = False
-
-                    _outputs_checked = True
-                else:
-                    debug(
-                        f"Task is dirty because the database doesn't have the target (%r, hash=%r).",
-                        target_key,
-                        h
-                    )
+                if self._check_outputs_stale_or_missing(evaluated, h):
+                    # db has a target produced with the specified hash. outputs are still valid.
+                    debug(f"Task is dirty because the outputs are stale (%r).", target_key)
                     target_dirty = True
+                else:
+                    debug(f"Outputs of task are not stale (%r, hash=%r).", target_key, h)
+                    target_dirty = False
 
-                if target_dirty is True:
-                    return target_dirty, errors
+                _outputs_checked = True
+            else:
+                debug(
+                    f"Task is dirty because the database doesn't have the target (%r, hash=%r).",
+                    target_key,
+                    h
+                )
+                target_dirty = True
+
+            if target_dirty is True:
+                return target_dirty, errors
 
         if target_dirty is False:
             # memory or db has the target
@@ -1133,11 +1229,11 @@ class Executor:
             error("Can't find %s in %s %r", target.key(), self.queued, target)
             raise e from e
 
-    def _mark_target_complete(self, target: EvaluatedTask):
+    def _mark_target_complete(self, target: Task):
         # Mark a target as complete. This is called when the target is not dirty.
         self._target_status[target.key()] = True
 
-    def _mark_target_executed(self, target: EvaluatedTask):
+    def _mark_target_executed(self, target: Task):
         # Mark the target as actually executed; like, a thread was created to run it.
         if target not in self.finished:
             self.finished.append(target)
@@ -1154,7 +1250,7 @@ class Executor:
     def _execute_target(
         self,
         target: TaskObject,
-    ) -> tuple[Optional[EvaluatedTask], Optional[list[Exception]]]:
+    ) -> tuple[Optional[Task], Optional[list[Exception]]]:
 
         # Don't execute any more if we have a stop flag.
         if self.stop.is_set():
@@ -1286,7 +1382,7 @@ class Executor:
         self._queue_target_on_pool(evaluated, delete_output, hash)
         return evaluated, None
 
-    def _queue_target_on_pool(self, evaluated: EvaluatedTask, delete_output, hash) -> None:
+    def _queue_target_on_pool(self, evaluated: Task, delete_output, hash) -> None:
         # TODO: we should get a future here.
         #  if there was an exception, stop everything, both execution and evaluation.
         #  if all the requirements have evaluated (or no requirements), execute.
@@ -1329,7 +1425,7 @@ class Executor:
         future.add_done_callback(lambda future, x=evaluated: self._target_completed(x, future))
         return None
 
-    def _get_last_input_files(self, target: EvaluatedTask) -> list[Path]:
+    def _get_last_input_files(self, target: Task) -> list[Path]:
         metadata = self._load_target_metadata(target)
         if metadata is None:
             return []
@@ -1343,7 +1439,7 @@ class Executor:
 
         return True
 
-    def _check_outputs_stale_or_missing(self, target: EvaluatedTask, target_hash: str):
+    def _check_outputs_stale_or_missing(self, target: Task, target_hash: str):
         # Return True if any outputs are missing or stale
         dirty = True
         for output in target.outputs:
@@ -1373,7 +1469,7 @@ class Executor:
 
         return dirty
 
-    def _get_target_output_errors(self, target: EvaluatedTask) -> list[Exception]:
+    def _get_target_output_errors(self, target: Task) -> list[Exception]:
         # Check outputs are produced after target execution.
         # return errors if they aren't, or if something else is wrong.
         if self.ctx.dry_run:
@@ -1394,7 +1490,7 @@ class Executor:
                 )
         return errors
 
-    def _get_target_hash(self, target: EvaluatedTask):
+    def _get_target_hash(self, target: Task):
         key = target.key()
         hash = self._hash_cache.get(key, None)
         if hash is None:
@@ -1402,14 +1498,14 @@ class Executor:
 
         return hash
 
-    def _put_target_hash(self, target: EvaluatedTask, hash):
+    def _put_target_hash(self, target: Task, hash):
         trace("Store task hash %s %s", target.key(), hash)
         self._target_hash[target.key()] = hash
 
-    def _target_completed(self, target: EvaluatedTask, result: Future[TargetResult]):
+    def _target_completed(self, target: Task, result: Future[TargetResult]):
         # Called after the Future is completed.
         # Called in *this* thread (not the thread in which the target was executed).
-        assert isinstance(target, EvaluatedTask)
+        assert isinstance(target, Task)
 
         self._mark_target_executed(target)
 
@@ -1432,18 +1528,19 @@ class Executor:
             self.stop.set()
             return None
 
-        if True:
-            errors = self._get_target_output_errors(target)
+        #self._successful_tasks.add(target.key())
 
-            if errors:
-                self.errors += errors
-                #self.stop.set()
-                return None
+        errors = self._get_target_output_errors(target)
+
+        if errors:
+            self.errors += errors
+            #self.stop.set()
+            return None
 
         # XXX: Store in database as soon as we're done with a success. No later.
         self._queue_for_database(target)
 
-    def _queue_for_database(self, target: EvaluatedTask):
+    def _queue_for_database(self, target: Task):
         if self.ctx.dry_run is True:
             return None
 
@@ -1463,7 +1560,12 @@ class Executor:
         for output in outputs:
             _set_xattr(output.path, _XATTR_OUTPUT_TARGET_HASH, target_hash)
 
-    def _execute_target_thread(self, ctx: Context, target: EvaluatedTask, target_hash):
+    def _execute_target_thread(self, ctx: Context, target: Task, target_hash):
+        if False and self.stop.is_set():
+            # Stop event may have been set while this thread is being queued.
+            # Prevent the task from executing.
+            return TargetResult(target, errors=[Exception("Task cancelled.")])
+
         # this is run in a separate thread...
         debug(f"Begin execution of task: {target} [thread={threading.current_thread().ident}]")
 
@@ -1480,6 +1582,12 @@ class Executor:
                 context.environment.update(target.environment)
 
             for command in target.actions or []:
+
+                if False and self.stop.is_set():
+                    # Stop event may have been set while this task is being run.
+                    # Prevent any more tasks/actions from executing.
+                    return TargetResult(target, errors=[Exception("Task cancelled.")])
+
                 debug(f"- Execute command (%s): %r", target.name, command)
 
                 if self.analysis_mode:

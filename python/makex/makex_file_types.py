@@ -13,11 +13,13 @@ from makex.context import Context
 from makex.protocols import FileProtocol
 from makex.python_script import (
     FILE_LOCATION_ARGUMENT_NAME,
+    BuiltInScriptObject,
     FileLocation,
     JoinedString,
     ListValue,
     PythonScriptError,
     StringValue,
+    script_object,
 )
 from makex.target import format_hash_key
 
@@ -26,8 +28,15 @@ ListTypes = (list, ListValue)
 
 # TODO: handle bytes
 
-PathLikeTypes = Union[StringValue, JoinedString, "PathElement", "TaskPath"]
-MultiplePathLike = Union["Glob", "FindFiles"]
+PathLikeTypes = Union[
+    StringValue,
+    JoinedString,
+    "PathElement",
+    "TaskPath",
+    "TaskSelfPath",
+    "TaskSelfName",
+]
+MultiplePathLike = Union["Glob", "FindFiles", "TaskSelfOutput", "TaskSelfInput"]
 AllPathLike = Union["Glob", "FindFiles", StringValue, JoinedString, "PathElement"]
 
 ValidJoinedStringPart = Union[
@@ -43,19 +52,16 @@ SENTINEL = object()
 
 
 # TODO: use an enum+protocol to distinguish most makex file types so we don't need to do isinstance everywhere (and we can use dicts for perf/matching).
-class MakexElementTypes(IntEnum):
-    STRING = 1
-    INTEGER = 2
-    BOOLEAN = 4
-    LIST = 8
-    DICT = 16
-    REGULAR_EXPRESSION = 32
-    GLOB = 64
-    TASK_PATH = 128
-    PATH_ELEMENT = 256
-    FIND_FILES = 512
-    RESOLVED_TASK = 1024
-    TASK_SELF = 2048
+class MakexScriptObject(BuiltInScriptObject):
+    REGULAR_EXPRESSION = 1 << 13
+    GLOB = 1 << 14
+    TASK_PATH = 1 << 15
+    PATH_ELEMENT = 1 << 16
+    FIND_FILES = 1 << 17
+    RESOLVED_TASK = 1 << 18
+    TASK_SELF = 1 << 19
+    TASK_SELF_NAME = 1 << 20
+    TASK_SELF_PATH = 1 << 21
 
 
 class VariableValue:
@@ -68,19 +74,13 @@ class Variable:
     location: FileLocation
 
 
-class FilePath:
-    string: str
-
-    def __fspath__(self):
-        return self.string
-
-
 @dataclass(frozen=True)
 class Variant:
     name: str
     value: str
 
 
+@script_object(MakexScriptObject.REGULAR_EXPRESSION)
 class RegularExpression:
     pattern: str
     location: FileLocation
@@ -93,6 +93,7 @@ class RegularExpression:
         return self.pattern
 
 
+@script_object(MakexScriptObject.GLOB)
 class Glob:
     pattern: Union[StringValue, "TaskPath", "PathElement", "UnresolvedPath"]
     location: FileLocation
@@ -105,7 +106,7 @@ class Glob:
         return self.pattern
 
     def __repr__(self):
-        return f'''Glob("{self.pattern}")'''
+        return f'''Glob("{self.pattern!r}")'''
 
 
 @dataclass()
@@ -155,11 +156,11 @@ class Expansion:
         return f"Expansion({self.string!r})"
 
 
+@script_object(MakexScriptObject.TASK_PATH)
 class TaskPath:
     """
     The [output] path object in makex files. Created by the makex task_path() function and others.
 
-    TODO: Rename to TaskPath.
     TODO: use str instead of path for late evaluation.
 
     """
@@ -245,6 +246,23 @@ class UnresolvedTaskPath(UnresolvedPath):
         self.reference = reference
         self.parts = parts or []
 
+    def join(self, *parts, **kwargs):
+        location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME)
+        for part in parts:
+            if isinstance(part, StringValue):
+                continue
+            else:
+                raise PythonScriptError(
+                    message=f"Expected StringValue, got {type(part)}",
+                    location=location,
+                )
+
+        return UnresolvedTaskPath(
+            reference=self.reference,
+            location=location,
+            parts=[*self.parts, *parts],
+        )
+
     def __truediv__(self, other):
         if isinstance(other, StringValue):
             return UnresolvedTaskPath(
@@ -258,7 +276,11 @@ class UnresolvedTaskPath(UnresolvedPath):
             "Can't serialize unresolved paths to strings (yet).", location=self.location
         )
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.parts!r})"
 
+
+@script_object(MakexScriptObject.TASK_SELF_NAME)
 class TaskSelfName:
     """
     Access the task's name.
@@ -287,6 +309,7 @@ class TaskSelfName:
         )
 
 
+@script_object(MakexScriptObject.TASK_SELF_PATH)
 class TaskSelfPath(UnresolvedPath):
     """
     Access the tasks path.
@@ -319,15 +342,19 @@ class TaskSelfPath(UnresolvedPath):
 
     def join(self, *parts, **kwargs):
         location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME)
-
         for part in parts:
-            if isinstance(part, StringValue) is False:
+            if isinstance(part, StringValue):
+                continue
+            else:
                 raise PythonScriptError(
                     message=f"Expected StringValue, got {type(part)}",
                     location=location,
                 )
 
-        self.parts.extend(parts)
+        return TaskSelfPath(
+            location=location,
+            parts=[*self.parts, *parts],
+        )
 
 
 class TaskSelfOutput(UnresolvedPath):
@@ -396,6 +423,7 @@ class TaskSelfInput(UnresolvedPath):
         self.name_or_index = name_or_index
 
 
+@script_object(MakexScriptObject.PATH_ELEMENT)
 class PathElement:
     """
 
@@ -405,7 +433,7 @@ class PathElement:
 
     """
     # the original path as defined
-    parts: Union[tuple[str], list[str]] = None
+    parts: Union[tuple[StringValue, ...], list[StringValue]] = None
 
     # Resolved is the actual fully resolved absolute path if any.
     # XXX: This is an optimization for when we can resolve a path
@@ -416,7 +444,13 @@ class PathElement:
     # base path of relative paths
     base: str
 
-    def __init__(self, *args: str, base: str = None, resolved=None, location=None):
+    def __init__(
+        self,
+        *args: Union[tuple[StringValue, ...], list[StringValue]],
+        base: StringValue = None,
+        resolved=None,
+        location=None
+    ):
         # TODO: change *args to parts.
         self.parts = args
         self.location = location
@@ -543,6 +577,7 @@ class PathElement:
             )
 
 
+@script_object(MakexScriptObject.FIND_FILES)
 class FindFiles:
     """
     find files. relative paths are based on the input.
@@ -559,27 +594,41 @@ class FindFiles:
 
 
 @dataclass(frozen=True)
-class TargetOutputsReference:
+class TaskOutputsReference:
     """
-    Reference to an output.
+    Reference to an output. Obtained by one of:
 
-    TargetReference(name, path).outputs[output_id]
+    reference(name, path).outputs(output_name)
+    
     or
-    Target[path:name].outputs[output_id]
+    
+    task[path:name].outputs(output_name)
+    
+    or 
+    
+    task_outputs(task[path:name], output_name)
 
     output_id is either an integer to access an item from a list, or a string to access items from a dictionary.
 
     If output_id is not specified, return all the outputs.
     """
-    target: "TaskReferenceElement"
+    task: "TaskReferenceElement"
+    location: FileLocation
     output_name: Optional[StringValue] = None
+
+    def __getattr__(self, item):
+        return TaskOutputsReference(self.task, output_name=item, location=self.location)
 
 
 class TaskReferenceElement:
     """
-    A reference to a Task in a makex file: Task(name, path).
+    A reference to a Task in a makex file with a name and optional path.
 
-    Also synthesized when a string with : is passed to a Task argument.
+    - Synthesized when a string with : is used in a context to refer to other tasks.
+    - Created by accessing the task registry (`task[path:name]`)
+    - Created by an explicit reference callable (e.g. `reference("{path}:{name}:{namespace}:{name}")`)
+    
+    self.namespace and self.namespace_name is filled if the reference 
     """
     name: StringValue
     path: Union[PathElement, StringValue]
@@ -635,7 +684,7 @@ class TaskReferenceElement:
         return f"TaskReferenceElement({self.name.value!r}{optional})"
 
     def outputs(self, name=None):
-        return TargetOutputsReference(self, name)
+        return TaskOutputsReference(self, name)
 
     @classmethod
     def from_strings(cls, name, path, location=None):
@@ -655,7 +704,7 @@ class ImplicitRequirement:
         return f"ImplicitRequirement({self.ref})"
 
 
-class ResolvedTaskReference:
+class TaskReference:
     """
     Used in a target graph and for external matching.
     """
@@ -669,7 +718,9 @@ class ResolvedTaskReference:
 
     __slots__ = ["name", "path", "location"]
 
-    def __init__(self, name: StringValue, path: Path, location: FileLocation = None) -> None:
+    def __init__(
+        self, name: Union[StringValue, str], path: Path, location: FileLocation = None
+    ) -> None:
         object.__setattr__(self, 'name', name)
         object.__setattr__(self, 'path', path)
         object.__setattr__(self, 'location', location)
@@ -678,7 +729,7 @@ class ResolvedTaskReference:
         return format_hash_key(self.name, self.path)
 
     def __eq__(self, other):
-        #assert isinstance(other, ResolvedTaskReference), f"Got {type(other)} {other}. Expected ResolvedTarget"
+        #assert isinstance(other, TaskReference), f"Got {type(other)} {other}. Expected ResolvedTarget"
         assert hasattr(other, "key"), f"{other!r} has no key() method."
         assert callable(getattr(other, "key"))
         return self.key() == other.key()
@@ -768,6 +819,6 @@ def _join_string_iterable_nopath(string: JoinedString):
         #elif isinstance(part, (TaskPath,TaskSelfPath,TaskSelfInput,TaskSelfOutput)):
         else:
             raise PythonScriptError(
-                message=f"Invalid value type in joined string. Expected String. Got {type(part)}.",
+                message=f"Invalid value type in joined string. Can't use a {type(part)}. Expected String-like values.",
                 location=string.location,
             )

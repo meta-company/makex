@@ -2,13 +2,14 @@
 
 Workspaces define the roots or boundaries of projects or a repository.
 
-Workspaces use the special `//` prefix marker in paths to refer to tasks consistently in a workspace without having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
+Workspaces use the special `//` prefix marker in paths to refer to Tasks consistently in a workspace without having to use relative paths (e.g the double dot marker (`..`)) or other mechanisms. 
 
 Tasks can not reach out of their Workspace for dependencies (for example, using `//..`). 
 For that matter, the double dot path traversal operator is disabled entirely in Makex Paths.
 
 Usage of Workspaces is not required. 
 If the Workspace is not defined, the root of the filesystem of the current working directory will be used as the Workspace.
+In this circumstance. the workspace prefix `//` shall mean the root directory.
 
 Defining a Workspace is highly recommended.
 
@@ -18,9 +19,9 @@ Workspaces are defined using the {envvar}`WORKSPACE<WORKSPACE>` environment vari
 
 Using the environment variable to set a workspace is preferred as it is simpler to switch workspaces. 
 If you plan to work on a [mostly] self-contained repository, a WORKSPACE file may be appropriate in the root of the repository. 
-It is recommended to export the WORKSPACE environment variable to all shells so that you can use makex and reference tasks from any folder.
+It is recommended to export the WORKSPACE environment variable to all shells so that you can use makex and reference Tasks from any folder.
 <!--
-the {data}`workspace<TOML.makex.workspace>` in a Makex configuration file
+the {confval}`makex.workspace<TOML.makex.workspace>` in a Makex configuration file
 the {option}`workspace <makex --workspace>` command line argument
 -->
 
@@ -53,8 +54,8 @@ The current Workspace is detected as follows, with the first match being the cur
 
 The prefix marker `//` is used to denote a Workspace path.
 
-A Task Locator takes the following form: `path:task_name`. The Path may be omitted to refer to tasks within the same Makex file
-or the task may in a Makexfile in a subfolder, or it may be an absolute path.
+A Task Locator takes the following form: `path:task_name`. The Path may be omitted to refer to Tasks within the same Makex file
+or the Task may in a Makexfile in a subfolder, or it may be an absolute path.
 
 ## Nested Workspaces
 
@@ -76,5 +77,5 @@ The current Workspace detection algorithm doesn't apply to nested/named Workspac
 - The {option}`--workspace<makex --workspace>` command line argument.
 - The {data}`makex.workspace<TOML.makex.workspace>` setting in Makex Configuration Files from one of the parents of the current working directory.
 - The {data}`makex.workspace<TOML.makex.workspace>` setting in of the global Makex Configuration Files (`~/.config/makex.toml` or `/etc/makex.toml`) 
-- The root/anchor of the "current" directory. The current directory is the path of the task's Makex file. 
+- The root/anchor of the "current" directory. The current directory is the path of the Task's Makex file. 
 -->

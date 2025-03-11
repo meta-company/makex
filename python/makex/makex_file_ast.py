@@ -3,6 +3,7 @@ from typing import Any
 
 from makex.makex_file_syntax import (
     _TARGET_REFERENCE_NAME,
+    MAKEX_FUNCTION_REFERENCE,
     MAKEX_FUNCTION_TASK,
     MAKEX_FUNCTION_TASK_SELF_INPUTS,
     MAKEX_FUNCTION_TASK_SELF_NAME,
@@ -80,7 +81,7 @@ class ProcessIncludes(ast.NodeTransformer):
 
 class TransformGetItem(ast.NodeTransformer):
     """
-        Transforms Task Reference Slice Syntax: task[name:path] into a TaskReference(name, path, location=)
+        Transforms Task Reference Slice Syntax: task[path:name] into a TaskReference(name, path, location=)
 
         We need to do this so we can get accurate FileLocations of task references later on.
 
@@ -124,7 +125,7 @@ class TransformGetItem(ast.NodeTransformer):
 
         reference_call = ast_Call(
             func=ast_Name(
-                id=_TARGET_REFERENCE_NAME,
+                id=MAKEX_FUNCTION_REFERENCE,
                 ctx=ast_Load(),
                 lineno=line,
                 col_offset=offset,

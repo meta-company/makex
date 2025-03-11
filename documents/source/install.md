@@ -14,8 +14,8 @@ The Makex executable will be installed to `~/.local/bin/makex`.
 
 Make sure `~/.local/bin` is on your `PATH`.
 
-```{note}
-Makex will also install itself as `mx`.
+```{tip}
+We recommend aliasing the makex executable to `mx` for brevity.
 ```
 
 <!--
@@ -37,8 +37,50 @@ Makex will also install itself as `mx`.
     pipx run makex
     ```
 
--->
+Tab sets are cute, but kind of pointless here:
+
+::::{tab-set}
+
+:::{tab-item} Using PIP
+
+To install Makex using pip, run:
+
+```sh
+pip install makex
+```
+
+The Makex executable will be installed to `~/.local/bin/makex`.
+
+Make sure `~/.local/bin` is on your `PATH`.
 
 ```{note}
-Binary packages of makex will be available soon.
+Makex will also install itself as `mx`.
+
+:::
+
+
+:::{tab-item} Using pipx
+```sh
+pipx install makex
 ```
+
+To run use: 
+
+```shell
+pipx run makex
+```
+
+:::
+
+:::{tab-item} Using UV
+
+```sh
+uv tool install makex
+```
+
+:::
+
+
+::::
+
+-->

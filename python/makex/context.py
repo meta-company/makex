@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 from copy import copy
@@ -12,6 +13,7 @@ from typing import (
     Pattern,
 )
 
+from makex._logging import debug
 from makex.colors import (
     ColorsNames,
     NoColors,
@@ -32,8 +34,13 @@ from makex.errors import (
 from makex.file_system import (
     safe_reflink,
     same_fs,
+    shutil_compatible_copy_file,
+    shutil_copy_file,
 )
-from makex.flags import IMPLICIT_REQUIREMENTS_ENABLED
+from makex.flags import (
+    IMPLICIT_REQUIREMENTS_ENABLED,
+    MAKEX_SYNTAX_VERSION,
+)
 from makex.patterns import combine_patterns
 from makex.platform_object import PlatformObject
 from makex.ui import UI
@@ -52,15 +59,37 @@ if TYPE_CHECKING:
     from makex.target import EvaluatedTaskGraph
 
 
+def detect_shell():
+    enclosing_shell = os.environ.get("SHELL", None)
+
+    # prefer sh shell if it exists
+    sh_path = Path("/bin/sh")
+    sh_exists = sh_path.exists()
+
+    if sh_exists:
+        return sh_path.as_posix()
+
+    # prefer bash shell if it exists
+    sh_path = Path("/bin/bash")
+    sh_exists = sh_path.exists()
+
+    if sh_exists:
+        return sh_path.as_posix()
+
+    # otherwise use enclosing shell
+    return enclosing_shell
+
+
 @dataclass
 class Context:
     """
-    Define a generic context so that subclasses can be defined with properties with types local to the subclass.
-
-    TODO: copy the values so they are all private self.__dict__[fqn.].
-    TODO: contexts should have their own namespaces. Context.cast() method should return the accessors for the specific type
-    TODO: ...or, we should just restrict Unions to not have conflicting implementations of property names
-
+    This primary object is passed throughout the program and its functions.
+    
+    The Context object retains configuration, settings, state, and globally accessible objects.
+    
+    This object is initialized once during program initialization.
+    
+    Field values may be filled or modified as needed.
     """
     # environment variables
     environment: dict[str, str] = field(default_factory=dict)
@@ -93,8 +122,9 @@ class Context:
     ignore_pattern: Pattern = re.compile(DEFAULT_IGNORE_PATTERN)
 
     # preferred copy file function
-    # may be changed to use reflinks
+    # may be changed to use reflinks on supported systems
     copy_file_function: Callable[[str, str], None] = shutil.copy
+    copy_file_function: Callable[[str, str], None] = shutil_copy_file
 
     # the configuration file
     # TODO: this isn't really used, we expand Configuration into context
@@ -120,7 +150,7 @@ class Context:
 
     # TODO: detect the current shell here early if any
     # otherwise use automatic
-    shell: str = "/bin/sh"
+    shell: str = field(default_factory=detect_shell)
 
     # names of makex files (Makexfile, makexfile, Build)
     makex_file_names = MAKEX_FILE_NAMES
@@ -150,6 +180,12 @@ class Context:
     }
 
     cpus: int = 1
+
+    makex_syntax_version: int = MAKEX_SYNTAX_VERSION
+
+    files_in_requirements_enabled: bool = True
+
+    include_enabled: bool = False
 
     @property
     def workspace_path(self):
@@ -204,11 +240,22 @@ class Context:
                 raise CacheError(f"Error creating cache directory at {cache}: {e}")
 
         # check this after we have a cache and workspace
-        if configuration.reflinks is None:
-            # configuration specified automatic detection of reflinks
-            if same_fs(ctx.workspace_path, ctx.cache) and reflink.supported_at(ctx.workspace_path):
-                ctx.copy_file_function = safe_reflink
+        if configuration.reflinks is None or configuration.reflinks is True:
+            # configuration specified automatic detection of reflinksd
+            _same_fs = same_fs(ctx.workspace_path, ctx.cache)
+            _reflink_support_workspace = reflink.supported_at(ctx.workspace_path)
+            debug("Workspace and Cache are same filesystem: %s", _same_fs)
+            debug("Reflink system support: %s", reflink.SUPPORTED)
+            debug("Reflink workspace support %s", _reflink_support_workspace)
+
+            if _same_fs and _reflink_support_workspace:
+                #ctx.copy_file_function = safe_reflink
+                # Use a shutil compatible copy file function
+                # TODO: replace this with a faster less-statier one once we drop shutil usage.
+                ctx.copy_file_function = shutil_compatible_copy_file
                 ctx.copy_on_write = True
+        else:
+            debug("Using traditional file copy functions.")
 
         if configuration.file_names:
             # TODO: validate string of
@@ -216,6 +263,9 @@ class Context:
 
         if configuration.output_folder:
             ctx.output_folder_name = configuration.output_folder
+
+        if configuration.include_enabled is not None:
+            ctx.include_enabled = configuration.include_enabled
 
         return ctx
 

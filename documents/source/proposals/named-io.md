@@ -6,12 +6,12 @@ status: "Draft"
 
 Sometimes, Tasks may provide multiple named outputs (e.g. `.css` and `.css.map` files when compiling sass/css).
 
-Some tasks may be written and understood more clearly if the input files have names/alias.
+Some Tasks may be written and understood more clearly if the input files have names/alias.
 
-DONE: we may need an explicit inputs keyword argument to task to clear things up.
-TODO: Retrieving inputs/outputs without a name specified should either [] or all inputs/outputs.
-TODO: Do we need separate namespaces for outputs/inputs files? (probably yes)
-TODO: Does referring to another task create an implicit dependency? (probably yes, configurable). 
+DONE: we may need an explicit inputs keyword argument to Task to clear things up.
+DONE: Retrieving inputs/outputs without a name specified should either [] or all inputs/outputs.
+DONE: Do we need separate namespaces for outputs/inputs files? (probably yes)
+DONE: Does referring to another task create an implicit dependency? (probably yes, configurable). 
 
 ## Function for referring to named/anonymous inputs/outputs
 
@@ -161,7 +161,7 @@ task(
 
 ```python
   task(
-    requires=[
+    inputs=[
         # input from the outputs of target
         named("source", outputs("target", name="")),
         input("source", outputs("")),
@@ -197,7 +197,7 @@ task(
         # implicitly, all outputs or singular
         "external": task[path:name],
     },
-    requires=[
+    inputs=[
         # all bad ideas:
         input("name", "hello-world.txt", ...),
         # or:

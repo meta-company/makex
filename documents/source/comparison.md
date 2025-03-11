@@ -8,7 +8,7 @@
   - Large units means less overhead when doing remote execution.
     - Sending and working with several large files is often faster than splitting into small ones (given additional network overhead).
 
-- Bazel defines __many__ "non-generic" task producing functions/macros/actions (one can use `genrule`, but is inelegant).
+- Bazel defines __many__ "non-generic" Task producing functions/macros/actions (one can use `genrule`, but is inelegant).
   - Rather than just `task()` (in Makex), one must remember `cc_binary`, `cc_module`, `cc_module_binary`, `python_library`, `python_binary`, etc in Bazel.
     - While these are great for convenience and standardization, especially within a company, they make build files harder to read/process.
 
@@ -23,7 +23,7 @@
     - For example, glob's were not implemented for "performance" (and possibly "correctness").
   - Makex was designed to be powerful and safe enough for engineers of all kinds.
 
-- Bazel adopts an alternate locator syntax for referring to tasks in external workspaces (For example, the `@external` prefix).
+- Bazel adopts an alternate locator syntax for referring to Tasks in external workspaces (For example, the `@external` prefix).
   - Makex provides a single logical view of both internal and external workspaces.
 
 - Inspecting the outputs of Bazel is complicated.
@@ -36,6 +36,7 @@
 
 ## CMake
 
+- Cmake is a generator. You'll still inherit the same problems as make/gmake and other build systems.
 - Cmake is a domain specific language with uncommon syntax.
   - Cmake is declarative and obscures what executables shall be executed with what arguments.
   - Writing macros and functions is confusing.
@@ -54,6 +55,8 @@
   - Tabs are forced. This frequently confuses new users.
   - Uses an unconventional syntax to access/escape variables.
   - Uses variables such as `$<`, `$@`, `$^` to refer to inputs/outputs/dependencies/etc.
+- Make requires a `clean` step to remove artifacts. 
+- Make requires manually managing the outputs or cache of targets/Tasks.
 - Make provides no help, introspection, analysis or visualization tools.
   - Accessing the list of targets in make file is convoluted.
 - Make provides no access to the build graph.
@@ -69,6 +72,7 @@
   - Subprocesses and context switches shall happen whether the sub-target needs rebuilding or not.
 - No list data structure.
 - No mapping data structure.
+- There is no canonical make language (gnu/BSD/etc)
 
 ## Meson
 

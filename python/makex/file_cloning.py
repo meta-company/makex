@@ -10,6 +10,7 @@ The following filesystems support file cloning: bcachefs, btrfs, XFS, ZFS (unsta
 """
 
 import errno
+import logging
 import os
 import sys
 from typing import Union
@@ -190,11 +191,13 @@ def supported_at(path: Union[str, os.PathLike]) -> bool:
 
     with open(a, 'w+') as f:
         f.write("")
+
     try:
         _clone_file_platform(a, b)
         return True
+    except Exception as e:
+        logging.exception(e)
     finally:
         os.unlink(a)
         if os.path.isfile(b):
             os.unlink(b)
-        return False

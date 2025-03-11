@@ -15,18 +15,18 @@ from makex.makex_file import (
     MakexFile,
     TaskObject,
 )
-from makex.makex_file_actions import InternalActionBase
+from makex.makex_file_actions import InternalAction
 from makex.makex_file_parser import TargetGraph
 from makex.makex_file_types import (
     PathElement,
-    ResolvedTaskReference,
+    TaskReference,
 )
 from makex.protocols import (
     CommandOutput,
     StringHashFunction,
 )
 from makex.python_script import FileLocation
-from makex.target import EvaluatedTask
+from makex.target import Task
 from makex.workspace import Workspace
 
 
@@ -166,7 +166,7 @@ def path(*args: Union[str, PathLike], parent=None):
     return PathElement(*args, resolved=None)
 
 
-class WriteTestAction(InternalActionBase):
+class WriteTestAction(InternalAction):
     def __init__(self, path: str, text, location=None):
         self.path: str = path
         self.text = text
@@ -183,10 +183,10 @@ class WriteTestAction(InternalActionBase):
     ):
         return hash_function(f"{self.path}|{self.text}")
 
-    def transform_arguments(self, ctx: Context, target: EvaluatedTask):
+    def transform_arguments(self, ctx: Context, target: Task):
         pass
 
-    def run_with_arguments(self, ctx: Context, target: EvaluatedTask, arguments) -> CommandOutput:
+    def run_with_arguments(self, ctx: Context, target: Task, arguments) -> CommandOutput:
         path = Path(self.path)
         if not path.is_absolute():
             path = target.path / self.path
@@ -209,11 +209,11 @@ def test_input_ouput(tmp_path: Path):
     """
     Test diamond dependencies.
 
-    d
-    /\
-    cb
-    \/
-    a
+     d
+    / \
+    c b
+    \ /
+     a
 
     """
 
@@ -235,8 +235,6 @@ def test_input_ouput(tmp_path: Path):
     opath = PathMaker(output)
 
     ipath = PathMaker(input)
-
-    debug("$SSSSS %s", opath())
 
     makex_file = MakexFile(None, input_make_file)
     d = TaskObject(
@@ -288,10 +286,10 @@ def test_input_ouput(tmp_path: Path):
 
     # assert execution order is valid
     l = [
-        ResolvedTaskReference("d", input_make_file),
-        ResolvedTaskReference("b", input_make_file),
-        ResolvedTaskReference("c", input_make_file),
-        ResolvedTaskReference("a", input_make_file),
+        TaskReference("d", input_make_file),
+        TaskReference("b", input_make_file),
+        TaskReference("c", input_make_file),
+        TaskReference("a", input_make_file),
     ]
     #assert l == [d, b, c, a]
     assert l[0] == d

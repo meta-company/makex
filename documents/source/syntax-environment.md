@@ -4,7 +4,7 @@ Environment variables can be accessed using the `Environment` object (or `E` for
 
 Any use of environment variables in a Makex file is recorded. 
 If any environment variable changes, 
-the tasks in that makex file become stale.
+the Tasks in that makex file become stale.
 
 A default value of an empty string `""` may be provided.
 

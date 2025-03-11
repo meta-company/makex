@@ -1,3 +1,30 @@
+# History
+
+This document lists major releases and changes for the Makex project.
+
+Versions are identified by the pattern `YYYYMMSS` (A date with sequence number; year (`YYYY`), month (`MM`), sequence (`SS`)).
+
+## 20250201 (PENDING)
+
+- **BREAKING CHANGE**: Task Locator pattern reversal!
+  - For example, `//path:task_name` it is now `task_name://path`, or `:task_name` is now `task_name`.
+  - See the [documentation](breaking/20250301.md) about this breaking change and tools to automatically fix.
+  - Old Makex files MUST be fixed ASAP.
+- **BREAKING CHANGE**: Path/Files in the task requirements are not allowed!
+  - Files/paths must be specified in the `task.inputs` list or mapping.
+  - See the [documentation](breaking/20250301.md) about this breaking change and tools to automatically fix.
+  - Old Makex files MUST be fixed ASAP.
+- **BREAKING CHANGE**: Task names can no longer contain `-` characters. This change may be reversed.
+- The `copy` function now overwrites files and folders.
+- Fix an issue with copy on write not being detected.
+- Improve recursive folder copying performance significantly.
+- Improve parsing speed significantly.
+- Improve path resolution.
+- Improve documentation.
+- Add experimental `task_outputs(name, path=None).output_name` function/expression.
+- Add `makex fix` command.
+
+
 ## 20250101
 
 - Add experimental support for Task self references. See the documentation/proposal.
@@ -66,6 +93,6 @@
 
 - Initial public release.
 
-## (2024-01-12)
+## ... (2024-01-12)
 
 - Project conceived.

@@ -26,7 +26,7 @@ def iterator(task):
 
 target(
     name="render-articles",
-    requires=[
+    inputs=[
         glob(""),
     ],
     steps=iterator,
@@ -36,7 +36,7 @@ target(
 ## Action functions
 
 The function shall take a [mostly] [Evaluated] Task object as the first argument. 
-The function shall have access to the task's inputs/outputs and other properties in a natural/programmatic manner.
+The function shall have access to the Task's inputs/outputs and other properties in a natural/programmatic manner.
 
 The function shall yield individual built-in Actions in order. 
 
@@ -44,5 +44,5 @@ The function shall yield individual built-in Actions in order.
 ## Considerations
 
 - Functions that produce actions must/should be marked/decorated as such. 
-  - We need a way to know when to pass the task as an argument. 
+  - We need a way to know when to pass the Task as an argument. 
   - A new `@action` decorator is proposed. The generic @macro decorator will certainly cause confusion and readability problems later.

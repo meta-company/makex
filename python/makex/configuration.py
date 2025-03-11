@@ -20,9 +20,9 @@ from makex.constants import (
     WORKSPACE_FILE_NAME,
 )
 from makex.errors import (
-    GenericFileLocation,
+    ConfigurationError,
+    FileLocation,
     GenericSyntaxError,
-    MakexError,
 )
 from makex.flags import READ_CONFIG_FROM_PARENTS
 
@@ -38,18 +38,12 @@ except ImportError:
         _HAS_TOML = False
 
 
-class ConfigurationError(MakexError):
-    def __init__(self, message, location: GenericFileLocation):
-        super().__init__(message)
-        self.location = location
-
-
 class ConfigurationValue:
     """
         Track string value locations because they are usually a source of problems, and we want to refer to that location
         for the user.
     """
-    def __init__(self, value, location: GenericFileLocation = None):
+    def __init__(self, value, location: FileLocation = None):
         super().__init__()
         self.value = value
         self.location = location
@@ -90,28 +84,34 @@ class Configuration:
     # Allow configuration files to set/evaluate environment variables before run
     environment: dict[str, str] = field(default_factory=dict)
 
+    include_enabled: bool = False
+
+    # configuration section data is stored here.
+    # makex stores it's own under makex.*
+    sections: dict[str, dict] = field(default_factory=dict)
+
     @classmethod
     def from_json(cls, d, path=None) -> "Configuration":
         # TODO: validate all of these
         root = d.get("makex")
-        workspace = root.get("workspace", None)
-        cache = root.get("cache", None)
-        shell = root.get("shell", None)
-        file_names = root.get("file_names", None)
+        workspace = root.pop("workspace", None)
+        cache = root.pop("cache", None)
+        shell = root.pop("shell", None)
+        file_names = root.pop("file_names", None)
         ignore = root.get("ignore", None)
-        reflinks = root.get("reflinks", None)
+        reflinks = root.pop("reflinks", None)
+        include_enabled = root.pop("include_enabled", None)
 
         if OUTPUT_FOLDER_CONFIGURATION_ENABLED:
-            output_folder = root.get("output_folder", None)
+            output_folder = root.pop("output_folder", None)
         else:
             output_folder = None
 
-        environment = root.get("environment", {})
+        environment = root.pop("environment", {})
 
-        environment = {
-            k: ConfigurationValue(v, GenericFileLocation(path))
-            for k, v in environment.items()
-        }
+        # TODO: extra the sections required by commands.
+
+        environment = {k: ConfigurationValue(v, FileLocation(path)) for k, v in environment.items()}
         return cls(
             path=path,
             workspace=workspace,
@@ -122,6 +122,7 @@ class Configuration:
             reflinks=reflinks,
             output_folder=output_folder,
             environment=environment,
+            include_enabled=include_enabled,
         )
 
     def merge_other(self, other: "Configuration"):
@@ -152,6 +153,9 @@ class Configuration:
         if other.environment:
             self.environment.update(other.environment)
 
+        if other.include_enabled is not None:
+            self.include_enabled = other.include_enabled
+
     def to_json(self):
         return {
             "makex": {
@@ -161,6 +165,7 @@ class Configuration:
                 "file_names": self.file_names,
                 "exclude": self.exclude,
                 "reflinks": self.reflinks,
+                "include_enabled": self.include_enabled,
             }
         }
 
@@ -171,7 +176,7 @@ SHELL_MARKER = "shell:"
 class RunFunction(Protocol):
     def __call__(
         self,
-        executable: str,
+        command: list[str],
         env: dict[str, str],
         capture: bool = False,
         print: bool = True,
@@ -194,6 +199,8 @@ def evaluate_configuration_environment(
         value = v.value
 
         if isinstance(value, dict):
+            # TODO: evaluation of shell is unnecessary here.
+            #  have users do this elsewhere (e.g. /etc/environment, ~/.profile, /etc/profile.d/)
             script = value.get("shell", None)
             if script is not None:
 
@@ -201,7 +208,7 @@ def evaluate_configuration_environment(
                 os.write(write, script.encode("utf-8"))
                 os.close(write)
                 process = run(
-                    shell,
+                    [shell],
                     env=current_enviroment,
                     capture=True,
                     shell=False,
@@ -210,7 +217,7 @@ def evaluate_configuration_environment(
                     stdin=read,
                 )
                 if process.status != 0:
-                    location: GenericFileLocation = getattr(v, "location", None)
+                    location: FileLocation = getattr(v, "location", None)
                     raise ConfigurationError(
                         f"Invalid shell command when evaluating environment variables from the file {location.path}:\n\t{value}\n:{process.output}\n{process.error}",
                         location=location
@@ -258,7 +265,7 @@ def read_configuration(path: Path) -> Configuration:
             d = toml.load(f)
             return Configuration.from_json(d)
         except toml.TomlDecodeError as e:
-            l = GenericFileLocation(path, e.lineno, e.colno)
+            l = FileLocation(path, e.lineno, e.colno)
             raise GenericSyntaxError(str(e), location=l, type="Configuration") from e
         except Exception as e:
             raise Exception(f"Error loading configuration file at {path}: {e} {type(e)}")
@@ -270,7 +277,7 @@ def read_configuration_json(path: Path) -> Configuration:
             d = json.load(f)
             return Configuration.from_json(d)
         except json.JSONDecodeError as e:
-            l = GenericFileLocation(path, e.lineno, e.colno)
+            l = FileLocation(path, e.lineno, e.colno)
             raise GenericSyntaxError(e.msg, location=l, type="Configuration") from e
         except Exception as e:
             raise Exception(f"Error loading configuration file at {path}: {e} {type(e)}")

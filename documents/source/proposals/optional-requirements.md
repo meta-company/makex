@@ -7,7 +7,7 @@ version: "20250501"
 
 Tasks may have optional requirements in the form of files or other tasks.
 
-These task/file requirements may not be defined purposely (e.g. because we don't need them), or because they haven't been defined/produced yet.
+These Task/file requirements may not be defined purposely (e.g. because we don't need them), or because they haven't been defined/produced yet.
 
 ## Example
 
@@ -23,7 +23,7 @@ COMPONENTS = [
 task(
     name="build",
     requires=[
-        [optional(f"components/{component_name}:build") for component_name in COMPONENTS],
+        [optional(f"build:components/{component_name}") for component_name in COMPONENTS],
     ],
     steps=[
         ...

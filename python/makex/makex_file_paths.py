@@ -14,7 +14,6 @@ from makex._logging import debug
 from makex.build_path import get_build_path
 from makex.constants import (
     IGNORE_NONE_VALUES_IN_LISTS,
-    TASK_PATH_NAME_SEPARATOR,
     WORKSPACES_IN_PATHS_ENABLED,
 )
 from makex.context import Context
@@ -22,8 +21,10 @@ from makex.errors import ExecutionError
 from makex.file_system import find_files
 from makex.flags import (
     ABSOLUTE_PATHS_ENABLED,
+    MAKEX_SYNTAX_VERSION,
     PATH_IN_GLOB_ENABLED,
 )
+from makex.locators import parse_task_reference
 from makex.makex_file_types import (
     Expansion,
     FindFiles,
@@ -33,6 +34,7 @@ from makex.makex_file_types import (
     PathElement,
     PathLikeTypes,
     RegularExpression,
+    TaskOutputsReference,
     TaskPath,
     TaskReferenceElement,
     TaskSelfInput,
@@ -42,6 +44,7 @@ from makex.makex_file_types import (
     UnresolvedTaskPath,
     ValidJoinedStringPart,
 )
+from makex.path import PathWithLocation
 from makex.patterns import make_glob_pattern
 from makex.protocols import WorkspaceProtocol
 from makex.python_script import (
@@ -51,7 +54,7 @@ from makex.python_script import (
     StringValue,
     get_location,
 )
-from makex.target import EvaluatedTask
+from makex.target import Task
 
 MISSING = object()
 
@@ -85,7 +88,7 @@ def _validate_path(
     return True
 
 
-def join_string(ctx: Context, task: EvaluatedTask, base: Path, string: JoinedString):
+def join_string(ctx: Context, task: Task, base: Path, string: JoinedString):
     """
     Joins the string using the information from ctx/task.
     
@@ -107,7 +110,7 @@ def join_string(ctx: Context, task: EvaluatedTask, base: Path, string: JoinedStr
         )
 
 
-def _join_string_iterable(ctx, task: EvaluatedTask, base: Path, string: JoinedString):
+def _join_string_iterable(ctx, task: Task, base: Path, string: JoinedString):
     for part in string.parts:
         if isinstance(part, StringValue):
             yield part.value
@@ -127,6 +130,9 @@ def _join_string_iterable(ctx, task: EvaluatedTask, base: Path, string: JoinedSt
                 yield value.path.as_posix()
         elif isinstance(part, TaskSelfName):
             yield task.name
+        elif isinstance(part, TaskOutputsReference):
+            for output in _resolve_task_outputs_reference(ctx, task, path):
+                yield output.as_posix()
         else:
             raise PythonScriptError(
                 f"Invalid value type in joined string {type(part)}. Expected {ValidJoinedStringPart})",
@@ -177,7 +183,7 @@ def resolve_string_path_workspace(
     workspace: WorkspaceProtocol,
     element: StringValue,
     base: Path,
-) -> Path:
+) -> PathWithLocation:
 
     if element.value == ".":
         return base
@@ -197,7 +203,7 @@ def resolve_string_path_workspace(
 
     #trace("Resolve string path %s: %s", element, _path)
 
-    return _path
+    return PathWithLocation(_path, location=element.location)
 
 
 def resolve_path_element_workspace(
@@ -205,7 +211,7 @@ def resolve_path_element_workspace(
     workspace: WorkspaceProtocol,
     element: PathElement,
     base: Path,
-) -> Path:
+) -> PathWithLocation:
     if element.resolved:
         path = element.resolved
     else:
@@ -225,7 +231,7 @@ def resolve_path_element_workspace(
 
     #trace("Resolve path element path %r:  %r (%r)", element, path, element.parts)
 
-    return path
+    return PathWithLocation(path, location=element.location)
 
 
 def resolve_path_parts_workspace(
@@ -234,7 +240,7 @@ def resolve_path_parts_workspace(
     parts: Union[tuple[StringValue], list[StringValue]],
     base: Path,
     location: FileLocation,
-) -> Path:
+) -> PathWithLocation:
     path = Path(*parts)
 
     _validate_path(path.parts, location)
@@ -247,18 +253,17 @@ def resolve_path_parts_workspace(
     elif not path.is_absolute():
         path = base / path
 
-    return path
+    return PathWithLocation(path, location=location)
 
 
 def resolve_pathlike_list(
     ctx: Context,
-    task: EvaluatedTask,
+    task: Task,
     base: Path,
     name: str,
     values: Iterable[Union[PathLikeTypes, MultiplePathLike]],
     glob=True,
-    references=True,
-) -> Iterable[Path]:
+) -> Iterable[PathWithLocation]:
 
     for i, value in enumerate(values):
         if isinstance(value, StringValue):
@@ -277,6 +282,7 @@ def resolve_pathlike_list(
                     target=task,
                     location=value.location,
                 )
+
             # todo: use glob cache from ctx for multiples of the same glob during a run
             yield from resolve_glob(ctx, task, base, value)
         elif isinstance(value, FindFiles):
@@ -294,11 +300,17 @@ def resolve_pathlike_list(
             yield resolve_task_path(ctx, value)
         elif IGNORE_NONE_VALUES_IN_LISTS and value is None:
             continue
+        elif isinstance(value, TaskSelfPath):
+            yield _resolve_task_self_path(ctx, task, value)
         elif isinstance(value, TaskSelfInput):
             yield from task.inputs_mapping.get(value.name_or_index, [])
         elif isinstance(value, TaskSelfOutput):
             yield from task.output_dict.get(value.name_or_index, []).path
-        elif references and isinstance(value, TaskReferenceElement):
+
+        elif isinstance(value, TaskOutputsReference):
+            yield from _resolve_task_outputs_reference(ctx, task, value)
+
+        elif isinstance(value, TaskReferenceElement):
             # get the outputs of the specified task
             _path = value.path
 
@@ -342,18 +354,33 @@ def resolve_pathlike_list(
 
 def resolve_pathlike(
     ctx: Context,
-    target: EvaluatedTask,
+    target: Task,
     base: Path,
     value: PathLikeTypes,
     location=None,
-) -> Path:
+) -> PathWithLocation:
+    """
+    Resolve a _single_ PathLike value.
+    
+    Any types that may resolve to more than one value (e.g. TaskOutputsReference) are not resolved here.
+     
+    :param ctx: 
+    :param target: 
+    :param base: 
+    :param value: 
+    :param location: 
+    :return: 
+    """
     if isinstance(value, StringValue):
         return resolve_string_path_workspace(ctx, target.workspace, value, base)
+    elif isinstance(value, JoinedString):
+        return resolve_string_path_workspace(
+            ctx, target.workspace, join_string(ctx, target, base, value), base
+        )
     elif isinstance(value, TaskPath):
         return resolve_task_path(ctx, value)
     elif isinstance(value, TaskSelfPath):
         return _resolve_task_self_path(ctx, target, value)
-
     elif isinstance(value, TaskSelfOutput):
         task_path = target.path
 
@@ -385,15 +412,27 @@ def resolve_pathlike(
     elif isinstance(value, PathElement):
         return resolve_path_element_workspace(ctx, target.workspace, value, base)
     else:
+        #raise TaskValueError(
+        #    value=value,
+        #    task=target,
+        #    location=value.location or location or target.location,
+        #)
         raise PythonScriptError(
-            f"Invalid path type {type(value)} {value!r}", location or target.location
+            f"Invalid path type here {type(value)} {value!r}.", location or target.location
         )
 
 
-def _resolve_task_self_path(ctx, task: EvaluatedTask, value: TaskSelfPath) -> Path:
+def _resolve_task_self_path(ctx, task: Task, value: TaskSelfPath) -> PathWithLocation:
     task_path = task.path
-    value = Path(task_path, *value.parts)
-    return value
+    assert task_path is not None
+    try:
+        _value = Path(task_path, *value.parts)
+    except TypeError as e:
+        logging.exception(e)
+        raise PythonScriptError(
+            f"Broken task self path {value!r}: {e}", get_location(value, task.location)
+        )
+    return PathWithLocation(_value, location=value.location)
 
 
 def _make_glob_pattern(glob_pattern: str) -> Pattern:
@@ -411,15 +450,27 @@ def _make_glob_pattern(glob_pattern: str) -> Pattern:
 
 def resolve_glob(
     ctx: Context,
-    target: EvaluatedTask,
+    task: Task,
     path: PathLike,
     pattern: Glob,
     ignore_names=None,
-) -> Iterable[Path]:
+) -> Iterable[PathWithLocation]:
 
     ignore_names = ignore_names or ctx.ignore_names
 
-    _pattern = _make_glob_pattern(pattern.pattern)
+    _re_pattern = pattern.pattern
+    if isinstance(_re_pattern, TaskSelfPath):
+        _re_pattern = _resolve_task_self_path(ctx, task, _re_pattern).as_posix()
+    elif isinstance(_re_pattern, StringValue):
+        # valid.
+        pass
+    else:
+        raise PythonScriptError(
+            f"Invalid value for glob. Expected string or path. Got {type(_re_pattern)}",
+            location=get_location(_re_pattern, task.location)
+        )
+
+    _pattern = _make_glob_pattern(_re_pattern)
     yield from find_files(
         path,
         pattern=_pattern,
@@ -430,11 +481,11 @@ def resolve_glob(
 
 def resolve_find_files(
     ctx: Context,
-    target: EvaluatedTask,
+    target: Task,
     path,
     pattern: Optional[Union[Glob, StringValue, RegularExpression]],
     ignore_names=None,
-) -> Iterable[Path]:
+) -> Iterable[PathWithLocation]:
     # TODO: pass the find node
 
     # TODO: Handle extra ignores specified on the Find object
@@ -476,35 +527,12 @@ def resolve_find_files(
     )
 
 
-def parse_task_reference(string: StringValue) -> Optional[tuple[StringValue, StringValue]]:
-    """
-    Parse a simple task reference:
-    
-    //{path}:{task_name}
-    
-    :param string: 
-    :return: 
-    """
-    # Parse a task reference; path is optional
-    _string = string.value
-
-    if (index := _string.find(TASK_PATH_NAME_SEPARATOR)) >= 0:
-        if index == 0:
-            path = None
-        else:
-            path = StringValue(_string[0:index], string.location)
-
-        name = StringValue(_string[index + 1:], string.location)
-        return (path, name)
-    else:
-        return None
-
-
 def parse_possible_task_reference(
-    reference: StringValue
+    reference: StringValue,
+    syntax=MAKEX_SYNTAX_VERSION,
 ) -> Union[StringValue, TaskReferenceElement]:
     # TODO: handle references to the task namespace //{path}:{task_name}:{namespace}:{name} where namespace is one of inputs/outputs
-    if task_reference := parse_task_reference(reference):
+    if task_reference := parse_task_reference(reference, syntax=syntax):
         task_path, task_name = task_reference
 
         if not task_path:
@@ -515,10 +543,12 @@ def parse_possible_task_reference(
 
 
 def parse_task_reference_extended(
-    string: StringValue
+    string: StringValue,
 ) -> Optional[tuple[StringValue, StringValue, StringValue, StringValue]]:
     """
     Parse an extended task reference.
+    
+    DEPRECATED.
     
     //{path}:{task_name}:{namespace}:{name}
     
@@ -527,29 +557,29 @@ def parse_task_reference_extended(
     """
     _string = string.value
 
-    if (index := _string.find(TASK_PATH_NAME_SEPARATOR)) >= 0:
-        namespace = None
-        namespace_name = None
-
-        _name_part = _string[index + 1:]
-        if index == 0:
-            path = None
-        else:
-            _path_part = _string[0:index]
-            if TASK_PATH_NAME_SEPARATOR in _path_part:
-                # we have an extended reference with additional : markers
-                parts = _path_part.split(":")
-
-                _path_part = parts[0]
-                namespace = StringValue(parts[1], string.location)
-                namespace_name = StringValue(parts[2], string.location)
-
-            path = StringValue(_path_part, string.location)
-
-        name = StringValue(_name_part, string.location)
-        return (path, name, namespace, namespace_name)
-    else:
+    if (index := _string.find(TASK_PATH_NAME_SEPARATOR)) == -1:
         return None
+
+    namespace = None
+    namespace_name = None
+
+    _name_part = _string[index + 1:]
+    if index == 0:
+        path = None
+    else:
+        _path_part = _string[0:index]
+        if TASK_PATH_NAME_SEPARATOR in _path_part:
+            # we have an extended reference with additional : markers
+            parts = _path_part.split(TASK_PATH_NAME_SEPARATOR)
+
+            _path_part = parts[0]
+            namespace = StringValue(parts[1], string.location)
+            namespace_name = StringValue(parts[2], string.location)
+
+        path = StringValue(_path_part, string.location)
+
+    name = StringValue(_name_part, string.location)
+    return (path, name, namespace, namespace_name)
 
 
 def create_build_path_object(
@@ -575,7 +605,7 @@ def create_build_path_object(
 def resolve_path(
     context: Context,
     pathlike: Union[UnresolvedTaskPath, TaskSelfPath],
-    task: EvaluatedTask,
+    task: Task,
 ) -> Optional[ResolvedPath]:
     """ 
     Turn an unresolved path into a resolved path.
@@ -605,7 +635,7 @@ def resolve_path(
 
 def resolve_to_string(
     ctx: Context,
-    task: EvaluatedTask,
+    task: Task,
     value: PathLikeTypes,
 ) -> Optional[StringValue]:
     if isinstance(value, StringValue):
@@ -655,3 +685,34 @@ def resolve_to_string(
             message=f"Invalid argument type: {type(value)}. Expected String-like value.",
             location=get_location(value, task.location),
         )
+
+
+def _resolve_task_outputs_reference(ctx: Context, task: Task,
+                                    value: TaskOutputsReference) -> Iterable[Path]:
+    output_name = value.output_name
+    task_name = value.task.name
+    task_path = str(value.task.path)
+
+    task = ctx.graph_2.get_task2(task_name, task_path)
+
+    if task is None:
+        raise PythonScriptError(
+            f"Missing task referred to in task_outputs function: {value.task}", value.location
+        )
+
+    if output_name is None:
+        # return all of them
+        for output in task.outputs:
+            yield output.path
+
+    # return a specific output
+    output = task.output_dict.get(output_name, None)
+    if output is None:
+        raise PythonScriptError(
+            f"Task {value.task} does not have any outputs named {output_name}", value.location
+        )
+
+    if isinstance(output, list):
+        return output
+
+    return [output]

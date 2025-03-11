@@ -42,9 +42,9 @@ In other words, variants in child Makex files inherit those of all the parents.
 
 If it is still not found after this search, an error is raised.
 
-All the current variants of Makex file all the way to the Makex file of the root task are in a variable VARIANTS.
+All the current variants of Makex file all the way to the Makex file of the root Task are in a variable VARIANTS.
 
-Variants can be specified on the command line or tasks.
+Variants can be specified on the command line or Tasks.
 
 ```shell
 
@@ -97,9 +97,9 @@ variant(
             "binary": "/usr/bin/python3.6"
         },
         "4.0": {
-            # depend on file in workspace (if any tasks produce them, build them first)
+            # depend on file in workspace (if any Tasks produce them, build them first)
             #"binary": Path("//path/to/cpython/4.0/bin/python"),
-            # build the specified task to make binary (build them before running any tasks depending on the variant)
+            # build the specified task to make binary (build them before running any Tasks depending on the variant)
             "binary": Task("cpython", "//path/to/cpython/4.0").output["binary"],
         }
     }
@@ -160,12 +160,12 @@ task(
 If the `example-variant` choice is not specified, `ARGS` shall be an UndeterminedVariantList with one value (`-example-argument`).
 The execute function should error because of this undetermined value.
 
-Upon execution of tasks, actions like `execute()` should respond early when one of their arguments is undetermined.
+Upon execution of Tasks, actions like `execute()` should respond early when one of their arguments is undetermined.
 
 
 ## branching/conditions based on variants (if_variant, if_not_variant)
 
-`if_variant(variant_specifier, *values)` can be used to vary the arguments to a task. 
+`if_variant(variant_specifier, *values)` can be used to vary the arguments to a Task. 
 If the variant is in effect, the values are included in argument values; otherwise they are ignored.
 
 `if_not_variant()` is available which is the opposite of `if_variant`: if the variant is NOT in effect, the values are included
@@ -194,9 +194,9 @@ task(
 TODO: or `if_true(variant_enabled(), ...)`
 
 
-##  branching entire tasks based on variants
+##  branching entire Tasks based on variants
 
-If you would like to enable/disable entire tasks based on the specified variant(s), the variants argument to tasks may be used to do so:
+If you would like to enable/disable entire Tasks based on the specified variant(s), the variants argument to Tasks may be used to do so:
 
 For example:
 

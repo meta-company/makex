@@ -1,46 +1,80 @@
 # Tasks
 
-A Task may be an objective, goal or task (or series of tasks); these terms may be used synonymously.
+A Task may be an objective, goal or Task (or series of Tasks); these terms may be used synonymously.
 
-A Task must define its name; and may define its output path, requirements (files and other Tasks), a list of things to run (steps/actions), and its outputs (files).
+A Task must define its name; and may define its requirements (other Tasks), a list of steps or [Actions](#actions) to run, [input files](#task-inputs), and [output files](#task-outputs).
 
-Each task has an output path; and an input path (the folder of the Makex file in which the task was defined). 
-The task output path is automatically generated, unless it is specified when defining a task.
+Each Task has a [source folder](#source-folder) (or Task Path), and an output folder (or [Cache](caching.md)). 
+The Task output path is automatically generated<!--, unless it is specified when defining a Task-->.
 
-Tasks are defined using the `task()` function.
+Tasks are defined using the {py:func}`task` function.
 
-## Task  Paths
+## Source Folder
 
-Tasks have a source path (the Task Source Path) and and output or cache path (the Task Output Path).
+The Task source folder is the folder of the Makex file in which the Task was defined.
 
-The Task source path is folder of the Makex file in which the task is was defined.
+(task_locators)=
 
-The Task output path is automatically generated (though it may be specified per task).
+```{include} task-locators.md
+:heading-offset: 1
+```
 
-## Task Requirements
+## Requirements
 
-Tasks may require other tasks and files (including files produced from other tasks).
+Tasks may require other Tasks.
 
-The task(requires=[]) argument is used to define this list.
+The `requires` argument to the {py:func}`task` function is used to define the Task requirements list.
 
 For example, the following fragment shows the various ways a task can define these dependencies:
 
 <!--
-
   # expand() function to expand home directories
   expand("~/path/to/file"),
-        
   # absolute path to task, a specific variant
   Task("task-name", "//path/to/task", variant={"variant-name": "variant-value"}),
-  
 -->
+
 ```python
 task(
     name="example",
     requires=[
+        # File local task, named "task-name"
+        "task_name",
+        
+        # Task in relative path (path/to/task/Makexfile), named "task-name"
+        "task_name:path/to/task",
+        
+        # Task in workspace path (//path/to/task/Makexfile), named "task-name"
+        "task_name://path/to/task",
+    ]
+)
+```
+
+If a requirement changes, the Task requiring it will be considered "stale" or "dirty". Stale Tasks need to be executed to produce fresh outputs.
+
+A Task with outputs, and without any requirements will always be run.
+
+## Task Inputs
+
+A task may define paths to files it requires (the Task's Input Files).
+
+The `inputs` argument to the {py:func}`task` function may be used to define these files.
+
+The input files may be a list path names. or it may be a mapping of name to one or more paths (see [Naming Input Files](#naming-input-files)).
+Input files may also be the results of functions that find files.
+
+Paths may be explicit Strings, or they be found using the `glob` or `find` functions.
+For these functions – in the context of the inputs list – paths are relative to the Makexfile.
+
+An example of expressing various forms of paths are below:
+
+```python
+task(
+    name="example",
+    inputs=[
         # absolute path to file
         "/absolute/path/to/file",
-        
+
         # relative path to file (from the directory of this makex file)
         "file",
 
@@ -49,86 +83,28 @@ task(
 
         # absolute workspace path to file 
         "//path/to/file",
-        
-        # File local task, named "task-name" (shorthand)
-        ":task-name",
-        
-        # Task in relative path (path/to/task/Makexfile), named "task-name" (shorthand)
-        "path/to/task:task-name",
-        
-        # Task in workspace path (//path/to/task/Makexfile), named "task-name" (shorthand)
-        "//path/to/task:task-name",
     ]
 )
 ```
 
-
-If a requirement changes, the Task requiring it will be considered "stale" or "dirty". Stale Tasks need to be executed to produce fresh outputs.
-
-A Task with outputs, and without any requirements will always be run.
-
-### Optional Requirements
-
-```{note}
-NOTE: This feature is experimental and subject to change. See the proposal.
-```
-
-You may require running tasks that may have not been defined yet, or may never be defined. 
-This is typically used in a component/module building pattern where modules may or may not require any build steps.
-
-For example:
-
-```python
-task(
-    name="example",
-    requires=[
-        optional(":optional_task1"),
-        optional(":optional_task2"),
-    ],
-    steps=[
-        ...
-    ],
-)
-```
-
-or:
-
-```python
-COMPONENTS = [
-    "component1",
-    "component2",
-]
-
-task(
-    name="example",
-    requires=[
-        [optional(f"components/{component}:build") for component in COMPONENTS],
-    ],
-    steps=[
-        ...
-    ],
-)
-```
-
+<!--
 ## Input Files
 
 Input files are any of the Tasks requirements which refer to files. 
 
 Additionally, if the task refers to any files generated by other Tasks, those are also input files.
+-->
 
 <!-- A task may be defined to use the output files of another Task in its inputs files or actions. -->
 
 ### Naming Input Files
 
-
-```{note}
-NOTE: This feature is experimental and subject to change. See the proposal.
-```
-
-Input files may be named by passing a mapping to the `inputs` argument of a Task.
 You may name one file, or list of files.
 
-Names must be valid identifiers (`[a-zA-Z][a-zA-Z0-9_]+`).
+Input files may be named by passing a mapping to the `inputs` argument of the {py:func}`task` function.
+The mapping has keys that are names, and values that may be one or more paths.
+
+Names must be valid identifiers (`[a-zA-Z][a-zA-Z0-9_]+` or `_`).
 
 For example:
 
@@ -136,32 +112,44 @@ For example:
 task(
     name="example",
     inputs={
-        "name1": "path/to/output1",
-        "name2": ["path/to/output2", "path/to/output3", ...],
+        # a single file:
+        "name1": "path/to/input1",
+        
+        # multiple files:
+        "name2": [
+            "path/to/input2", 
+            "path/to/inputs3", 
+            ...
+        ],
+        
+        # unnamed files (still accessible by the `_` name)
+        "_": ["path/to/unnamed-input"]
     },
     steps=[
         # self.inputs.name1
         # self.inputs.name2
+        # self.inputs._
         ...
     ]
 )
 ```
 
+If you wish to leave files unnamed in the input map, use the empty key (`"_"`). 
+
 ## Actions
 
-A Task may define a list of "Actions" with the `task(steps=[])` argument. 
-Actions may be shell scripts, programs/executables and their arguments, or any of the built-in actions.
+A Task may define a list of Actions with the `steps` argument to the {py:func}`task` function. 
+Actions may be running an executable with arguments ({py:func}`execute`), shell scripts ({py:func}`shell`), or any of the built-in Actions (e.g. {py:func}`print`).
 
-The list of things to run is executed in order. 
-Any errors during execution will cause Makex to stop.
+Errors during execution of an Action will cause Makex to stop.
 
-## Outputs
+## Task Outputs
 
 A Task may define a list of output files. 
-If any files are generated as part of running the Task are used, they should be specified.
-The output files should be specified with paths relative to the Task's output path.
+If any files are generated as a result of running the Task, they should be specified in this list.
+Relative paths in this list are interpreted relative to the Task's output folder.
 
-If a Task has outputs, Makex will use hashes, checksums and caching strategies to see if the Task needs to be run to reproduce the outputs.
+If a Task has output files, Makex will use hashes, checksums and caching strategies to see if the Task needs to be run to reproduce output files.
 
 A Task with no defined output files will always be run. 
 If no output files are defined, Makex will be unable to determine if the Task's outputs are stale;
@@ -175,20 +163,13 @@ Changes to a Task definition, its dependencies, or any of its input files will c
 Tasks may define outputs in multiple ways, singular, named (singular or list), or as a list. 
 
 #### Declaring a singular output
-
 #### Declaring a list of outputs
-
 #### Declaring named outputs
-
 -->
 
 ### Naming Output Files
 
-```{note}
-NOTE: This feature is experimental and subject to change. See the proposal.
-```
-
-Output files may be named by passing a mapping to the `outputs` argument of a Task.
+Output files may be named by assigning a mapping to the `outputs` argument of the {py:func}`task` function.
 You may name one file, or lists of files.
 
 For example:
@@ -208,13 +189,14 @@ task(
 
 Names must be valid identifiers (`[a-zA-Z][a-zA-Z0-9_]+`).
 
+Output files explicitly defined as Strings may be referenced using self references.
 
-(task_locators)=
-```{include} task-locators.md
-:heading-offset: 1
-```
+Output files may contain the result of {py:func}`glob` and {py:func}`find`, however, these are evaluated after the task is run.
+This means it is impossible to know what the outputs of a task are until the task has been completed.
 
-## Task Self References
+
+
+## Self References
 
 ```{note}
 NOTE: This feature is experimental and subject to change. See the proposal.
@@ -228,7 +210,7 @@ These properties are:
 
 - `self.name`: The name of the task
 - `self.path`: The output/cache path of the task.
-- `self.inputs`: The inputs mapping of the task.
+- `self.inputs`: The inputs mapping of the task. 
 - `self.outputs`: The outputs mapping of the task.
 
 For example:
@@ -255,3 +237,49 @@ task(
 
 If any named inputs/outputs are defined as a list, accessing `self.inputs.name` or `self.outputs.name` will return that list. 
 You may not access members of the list individually (For example, using the index operation `self.inputs.example[index]`).
+
+You may not reference a named output containing results of {py:func}`glob` or {py:func}`find`.
+You may not reference a named output or assigned to the results of {py:func}`glob` or {py:func}`find`.
+
+### Optional Requirements
+
+```{note}
+NOTE: This feature is experimental and subject to change. See the proposal.
+```
+
+You may require running Tasks that may have not been defined yet, or may never be defined.
+This is typically used in a component/module building pattern where modules may or may not require any build steps.
+
+For example:
+
+```python
+task(
+    name="example",
+    requires=[
+        optional("optional_task1"),
+        optional("optional_task2"),
+    ],
+    steps=[
+        ...
+    ],
+)
+```
+
+or:
+
+```python
+COMPONENTS = [
+    "component1",
+    "component2",
+]
+
+task(
+    name="example",
+    requires=[
+        [optional(f"build:components/{component}") for component in COMPONENTS],
+    ],
+    steps=[
+        ...
+    ],
+)
+```

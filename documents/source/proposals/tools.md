@@ -22,7 +22,7 @@ a tool() or require_tool() primative. e.g. `PYTHON = tool("/usr/bin/python", ver
 
 If an action is specified for version argument, it inspects/loads/prints the version for tool so it can be hashed when used.
 
-The version argument is called before any use of the tool during task evaluation.
+The version argument is called before any use of the tool during Task evaluation.
 
 The version may be provided as a constant as a String/Integer literal or from an Environment Variable.
 

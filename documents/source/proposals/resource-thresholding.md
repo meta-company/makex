@@ -9,11 +9,13 @@ This document describes a proposal for the control of the resources makex uses.
 
 A static threads/workers/jobs argument (e.g. `--jobs` in make/ninja/mason/bazel/etc) doesn't properly constrain local machine resource allocation.
 
-For example, if a run has a high amount of tasks to run, the tasks may slow the machine down.
+For example, if a run has a high amount of tasks to run, the tasks may slow the machine down (CPU contention).
 
-Conversely, if one or more task executions use a high amount of memory, newly queued/executed tasks may not run properly with memory being exhausted.
+Conversely, if one or more task executions use a high amount of memory, newly queued/executed tasks may not run properly with memory being exhausted (Memory Contention).
+If a task uses a high amount of disk IO, other tasks may proceed more slowly because of it (IO/Disk/Storage Contention). 
 
-Developers using makex would prefer it didn't use all of their machine's resources. No build tools have obvious ways to control these resource constraints.
+Developers using makex would prefer that it didn't use all of their machine's resources.
+No build tools have obvious ways to control these resource constraints.
 
 Tasks that require minimum memory are uncommon, but do exist. These are typically:
 
@@ -156,6 +158,10 @@ If only 1 CPU is available, it will be shared and scheduled [by the operating sy
   - Watch for load status. If load is high, reduce it by:
     - Limiting the amount of tasks queued per quantum
 
+### Disk Thresholding
+
+TODO: we need a way to determine which disk/fs makex and the task inputs/outputs is operating on.
+TODO: we need a way to specify these constraints (`disk:identity:maximum_io`, tasks not exceed io load percentage; if they do, threshold)
 
 ## Considerations
 

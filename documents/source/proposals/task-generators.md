@@ -21,9 +21,7 @@ def clang_compile(target, index, item: Path):
     file_name = item.name.replace('.c', ".o")
     return target(
         name=file_name,
-        requires=[
-            item,
-        ],
+        inputs=item,
         steps=[
             execute("clang", "-o", target.path / file_name, item)
         ]

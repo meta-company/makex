@@ -4,14 +4,19 @@ from enum import (
     IntEnum,
 )
 from io import StringIO
-from pathlib import Path
+from pathlib import Path as PathlibPath
 from typing import (
+    Any,
     Protocol,
     Union,
 )
 
 from makex.colors import ColorsNames
-from makex.python_script import FileLocation
+from makex.path import PathProtocol
+from makex.python_script import (
+    FileLocation,
+    FileLocationProtocol,
+)
 
 
 class MakexError(Exception):
@@ -20,7 +25,7 @@ class MakexError(Exception):
 
 class SomeKindOfTarget(Protocol):
     name: str
-    path: Union[Path, str]
+    path: Union[PathProtocol, str]
 
 
 class ExecutionError(MakexError):
@@ -50,15 +55,15 @@ class ExternalExecutionError(MakexError):
 
 
 @dataclass(frozen=True)
-class GenericFileLocation:
-    path: Path
+class FileLocation:
+    path: PathlibPath
     line: int = None
     column: int = None
 
 
 class GenericSyntaxError(MakexError):
     def __init__(
-        self, error: Union[str, Exception], location: GenericFileLocation, type, context=(1, 2)
+        self, error: Union[str, Exception], location: FileLocationProtocol, type, context=(1, 2)
     ):
         super().__init__(error)
         self.error = error
@@ -78,7 +83,7 @@ class GenericSyntaxError(MakexError):
         buf.write(f"{colors.ERROR}{exception}{colors.RESET}'\n\n")
 
         context_before, context_after = self.context
-        with Path(location.path).open("r") as f:
+        with PathlibPath(location.path).open("r") as f:
             for i, line in enumerate(f):
                 li = i + 1
 
@@ -137,3 +142,28 @@ class ErrorCategory(Enum):
 
     # TODO: check/warn for conflicting default makex files in the same folder.
     MULTIPLE_DEFAULT_MAKEX_FILES = "Multiple Default Makex Files"
+
+
+class TaskValueError(MakexError):
+    value: Any
+    argument: str
+    task: SomeKindOfTarget
+    location: FileLocationProtocol
+
+    def __init__(
+        self,
+        value: Any,
+        argument: str = None,
+        task: SomeKindOfTarget = None,
+        location: FileLocationProtocol = None,
+    ):
+        self.value = value
+        self.argument = argument
+        self.task = task
+        self.location = location
+
+
+class ConfigurationError(MakexError):
+    def __init__(self, message, location: FileLocationProtocol):
+        super().__init__(message)
+        self.location = location

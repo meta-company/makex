@@ -3,14 +3,14 @@ from makex.makex_file import MakexFile
 from makex.metadata import TargetMetadata
 from makex.python_script import FileLocation
 from makex.target import (
-    EvaluatedTask,
+    Task,
     target_hash,
 )
 
 
 def test_metadata(tmp_path):
     makex_file = tmp_path / "Makexfile"
-    target = EvaluatedTask(
+    target = Task(
         name="test",
         path=tmp_path / "_output_" / "test",
         input_path=tmp_path,

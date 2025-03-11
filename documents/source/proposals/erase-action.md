@@ -4,13 +4,13 @@ version: "20241201"
 ---
 # Erase Action
 
-Provide an `erase()` action that will remove specific files from a task's output.
+Provide an `erase()` action that will remove specific files from a Task's output.
 
 ## Rationale
 
 - Removing files from a Task's output is common (e.g. before distribution/deployment, or for downstream Task output consumers).
 - `rm -rf` and related removal tools are fairly dangerous. 
-- There is no reason we need to force users to call the shell or execute system specific tools to remove files from a task's output.
+- There is no reason we need to force users to call the shell or execute system specific tools to remove files from a Task's output.
 
 ## Specification
 

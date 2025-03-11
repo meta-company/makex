@@ -42,11 +42,11 @@ It __*makex*__ stuff happen. 🙂
 
 <!-- quick-start -->
 
-## Requirements
+## Requirements 
 
 - Python >= 3.9
 
-## Quick Start
+## Quick Start 🏎️
 
 1. Install:
 
@@ -54,24 +54,22 @@ It __*makex*__ stuff happen. 🙂
   pip install makex
   ```
 
-2. Define a Makex file and name it `Makexfile` ( or `makexfile` if you prefer):
+2. Define a Makex file and name it `Makexfile` (or `makexfile`, if you prefer):
 
   ```python 
   task(
-      name="hello-world",
+      name="hello",
       steps=[
           write("hello-world.txt", "Hello World!"),
   
-          # or, you can use the shell, but it is not recommended:
-          # shell(f"echo 'Hello World!' > {self.path}/hello-world.txt"),
-          
           # you may also execute things:
           # execute("echo", "Hello World!"),
           
           # or just print things:
           # print("Hello World!"),
           
-          # more actions can go here; such as copying, mirroring or archiving...
+          # more actions can go here; 
+          # such as copying, mirroring or archiving...
       ],
       outputs=[
           "hello-world.txt",
@@ -82,10 +80,10 @@ It __*makex*__ stuff happen. 🙂
 3. Run makex, specifying the task name:
 
   ```shell
-  makex run :hello-world
+  makex run hello
   ```
 
-4. A file at `$PWD/_output_/hello-world/hello-world.txt` shall have the following contents:
+4. A file at `$PWD/_output_/hello/hello-world.txt` shall have the following contents:
 
   ```
   Hello World!
@@ -121,3 +119,9 @@ With that, Makex is being used extensively by us. We've created many tasks and M
 
 If you have any problems, feel free to contact us. 
 ```
+
+<!--
+# or, you can use the shell, but it is not recommended:
+# shell(f"echo 'Hello World!' > {self.path}/hello-world.txt"),
+-->
+

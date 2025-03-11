@@ -14,29 +14,30 @@ from typing import (
 from makex._logging import trace
 from makex.constants import HASHING_ALGORITHM
 from makex.context import Context
+from makex.locators import format_locator
 from makex.protocols import (
     CommandOutput,
     FileStatus,
     MakexFileProtocol,
     StringHashFunction,
+    WorkspaceProtocol,
 )
 from makex.python_script import FileLocation
-from makex.workspace import Workspace
 
 TaskKey = str
 
 HASH_FUNCTION = getattr(hashlib, HASHING_ALGORITHM, "sha1")
 
 
-class Action(Protocol):
+class InternalActionProtocol(Protocol):
     location: FileLocation
 
-    def __call__(self, ctx: Context, target: "EvaluatedTask") -> CommandOutput:
+    def __call__(self, ctx: Context, target: "Task") -> CommandOutput:
         # old Action function
         ...
 
     def run_with_arguments(
-        self, ctx: Context, target: "EvaluatedTask", arguments: dict[str, Any]
+        self, ctx: Context, target: "Task", arguments: dict[str, Any]
     ) -> CommandOutput:
         ...
 
@@ -46,14 +47,15 @@ class Action(Protocol):
         return
 
 
-class InternalAction:
+class Action:
     """
+    TODO: Rename to SerializedAction (or similar)
     Keep an Internal Action that records the arguments evaluated from a Action,
     so we can hash the Action before running it.
 
     Keep a pointer to the original Action as it's unnecessary to copy it.
     """
-    def __init__(self, action: Action, arguments: dict[str, Any]):
+    def __init__(self, action: InternalActionProtocol, arguments: dict[str, Any]):
         self.action = action
         self.arguments = arguments
 
@@ -67,7 +69,7 @@ class InternalAction:
 
         return self.action.hash(ctx=ctx, arguments=self.arguments, hash_function=hash_function)
 
-    def __call__(self, ctx, target: "EvaluatedTask") -> CommandOutput:
+    def __call__(self, ctx, target: "Task") -> CommandOutput:
 
         if getattr(self.action, "run_with_arguments", None):
             return self.action.run_with_arguments(ctx, target, self.arguments)
@@ -90,7 +92,7 @@ class Hasher:
 
 
 @dataclass
-class EvaluatedTask:
+class Task:
     """
     An "evaluated" target.
 
@@ -106,7 +108,7 @@ class EvaluatedTask:
 
     input_path: Path
 
-    workspace: Workspace = None
+    workspace: WorkspaceProtocol = None
 
     # all inputs used (or to be used) for this target
     inputs: list[FileStatus] = None
@@ -121,9 +123,9 @@ class EvaluatedTask:
     inputs_mapping: dict[Union[str, None], list[Path]] = None
 
     # references to targets this target requires.
-    requires: list["EvaluatedTask"] = None
+    requires: list["Task"] = None
 
-    actions: list[InternalAction] = None
+    actions: list[Action] = None
 
     # Contains the file path and location which the target was defined.
     location: FileLocation = None
@@ -136,15 +138,24 @@ class EvaluatedTask:
     # any environment variables defined by the task
     environment: dict[str, str] = None
 
+    # list of original requirements {name}:{path} where path is a fully resolved path.
+    requires_original: set[str] = None
+
     @property
     def makex_file_path(self) -> str:
         # TODO: fix this.
         return str(self.location.path)
 
+    def has_requirement(self, name, folder: Path = None) -> bool:
+        # Check a requirement in the original requirements list
+
+        locator = format_locator(name, folder)
+        return locator in self.requires_original
+
     def key(self) -> TaskKey:
         return format_hash_key(self.name, self.makex_file.path)
 
-    def __eq__(self, other: "EvaluatedTask"):
+    def __eq__(self, other: "Task"):
         keyfunc = getattr(other, "key", None)
         assert keyfunc is not None
         assert callable(keyfunc)
@@ -154,14 +165,14 @@ class EvaluatedTask:
         return hash(self.key())
 
     def __repr__(self):
-        return f"EvaluatedTask(\"{self.key()}\")" # , requires={self.requires!r})"
+        return f"Task(\"{self.key()}\")" # , requires={self.requires!r})"
 
     def hash(
         self,
         ctx: Context,
         hash_function: StringHashFunction = None,
         hasher: Type[Hasher] = None,
-        hash_cache: dict[str, "EvaluatedTask"] = None,
+        hash_cache: dict[str, "Task"] = None,
     ) -> str:
         hash_function = hash_function or target_hash
         hasher = hasher or Hasher
@@ -234,10 +245,10 @@ def format_hash_key(name: str, path: Union[PathLike, str]):
 
 
 class EvaluatedTaskGraph:
-    _targets: dict[TaskKey, EvaluatedTask]
-    _requires: dict[TaskKey, list[EvaluatedTask]]
-    _provides: dict[TaskKey, set[EvaluatedTask]]
-    _input_files: dict[Path, set[EvaluatedTask]]
+    _targets: dict[TaskKey, Task]
+    _requires: dict[TaskKey, list[Task]]
+    _provides: dict[TaskKey, set[Task]]
+    _input_files: dict[Path, set[Task]]
 
     def __init__(self):
         self._targets = {}
@@ -253,15 +264,15 @@ class EvaluatedTaskGraph:
         # targets for input files
         self._input_files = {}
 
-    def add_target(self, target: EvaluatedTask):
+    def add_target(self, target: Task):
         # NOTE: all requires MUST be added first
-        assert isinstance(target, EvaluatedTask), f"Got {type(target)}: {target!r}"
+        assert isinstance(target, Task), f"Got {type(target)}: {target!r}"
         key = target.key()
-        # TODO: only use altkey if the task comes from a default/main makexfile
-        altkey = format_hash_key(target.name, target.input_path)
         self._targets[key] = target
 
         # store in an alternate key for the folder default tasks
+        # TODO: only use altkey if the task comes from a default/main makexfile
+        altkey = format_hash_key(target.name, target.input_path)
         self._targets[altkey] = target
 
         # build edges from require -> target
@@ -272,7 +283,7 @@ class EvaluatedTaskGraph:
         for path in target.inputs:
             self._input_files.setdefault(path, set()).add(target)
 
-    SimpleGraph = tuple[EvaluatedTask, Iterable["SimpleGraph"]]
+    SimpleGraph = tuple[Task, Iterable["SimpleGraph"]]
 
     def get_affected_graph(self, paths: Iterable[Path], scopes: list[Path] = None) -> SimpleGraph:
         seen = set()
@@ -282,11 +293,11 @@ class EvaluatedTaskGraph:
 
         if scopes:
 
-            def scope_check(target: EvaluatedTask):
+            def scope_check(target: Task):
                 return self._scope_list_check(scopes, target.input_path)
 
         for path in paths:
-            targets: set[EvaluatedTask] = self._input_files.get(path, None)
+            targets: set[Task] = self._input_files.get(path, None)
 
             if targets is None:
                 continue
@@ -309,7 +320,7 @@ class EvaluatedTaskGraph:
         paths: Iterable[Path],
         scopes: list[Path] = None,
         depth=0,
-    ) -> Iterable[EvaluatedTask]:
+    ) -> Iterable[Task]:
         """
         Return targets affected by the input files.
 
@@ -331,11 +342,11 @@ class EvaluatedTaskGraph:
 
         if scopes:
 
-            def scope_check(target: EvaluatedTask):
+            def scope_check(target: Task):
                 return self._scope_list_check(scopes, target.input_path)
 
         for path in paths:
-            targets: set[EvaluatedTask] = self._input_files.get(path, None)
+            targets: set[Task] = self._input_files.get(path, None)
 
             if targets is None:
                 continue
@@ -354,10 +365,10 @@ class EvaluatedTaskGraph:
 
                 seen.add(key)
 
-    def get_target(self, target: EvaluatedTask) -> Optional[EvaluatedTask]:
+    def get_target(self, target: Task) -> Optional[Task]:
         return self._targets.get(target.key(), None)
 
-    def get_task2(self, task_name: str, path: str) -> Optional[EvaluatedTask]:
+    def get_task2(self, task_name: str, path: str) -> Optional[Task]:
         return self._targets.get(format_hash_key(task_name, path), None)
 
     def _scope_list_check(self, scopes, path):
@@ -370,11 +381,11 @@ class EvaluatedTaskGraph:
 
     def get_requires(
         self,
-        target: EvaluatedTask,
+        target: Task,
         scopes: list[Path] = None,
         depth=0,
         _depth=None,
-    ) -> Iterable[EvaluatedTask]:
+    ) -> Iterable[Task]:
         # return the requirements as an iterable
         _depth = -1 if _depth is None else _depth
 
@@ -389,7 +400,7 @@ class EvaluatedTaskGraph:
             yield require
 
     def get_requires_graph(self,
-                           target: EvaluatedTask,
+                           target: Task,
                            scopes: list[Path] = None,
                            recursive=True) -> Iterable[SimpleGraph]:
         # return the requirements as a graph
@@ -401,7 +412,7 @@ class EvaluatedTaskGraph:
             graph = self.get_requires_graph(target, scopes, recursive=recursive)
             yield (target, graph)
 
-    def get_inputs(self, target: EvaluatedTask, recursive=True) -> Iterable[Path]:
+    def get_inputs(self, target: Task, recursive=True) -> Iterable[Path]:
         """
         yields the inputs of target and required targets.
 
@@ -417,7 +428,7 @@ class EvaluatedTaskGraph:
         for input in target.inputs:
             yield input
 
-    def get_outputs(self, target: EvaluatedTask, recursive=True) -> Iterable[Path]:
+    def get_outputs(self, target: Task, recursive=True) -> Iterable[Path]:
         for require in target.requires:
             yield from self.get_outputs(require, recursive=recursive)
 
@@ -428,7 +439,7 @@ class EvaluatedTaskGraph:
         return self._targets.keys()
 
 
-def brief_task_name(ctx: Context, target: "EvaluatedTask", color=False):
+def brief_task_name(ctx: Context, target: "Task", color=False):
     # path = target.input_path
     path = Path(target.location.path)
     # if path.name in ["Makefilex", "Makexfile"]:

@@ -43,7 +43,7 @@ Use `include(tasks=True)` to include any tasks defined in the included file.
 
 For example, given a Makex file to be included (`//tools.mx`)
 and a Makexfile which includes (`//projects/Makexfile`); the including Makex File
-can call a macro (`make_task`) which registers a task in itself:
+can call a macro (`make_task`) which registers a Task in itself:
 
 The `//project/Makexfile` file:
 
@@ -70,5 +70,5 @@ parent folders up to the current workspace for the file to include.
 
 # Optional Includes
 
-Optional includes may be used to define macros and tasks which are not necessarily required or private.
+Optional includes may be used to define macros and Tasks which are not necessarily required or private.
 

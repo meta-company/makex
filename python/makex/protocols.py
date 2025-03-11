@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from os import PathLike
-from pathlib import Path
+from pathlib import Path as PathlibPath
 from types import CodeType
 from typing import (
     Callable,
@@ -13,6 +13,7 @@ from typing import (
 
 from makex.context import Context
 from makex.file_checksum import FileChecksum
+from makex.path import PathProtocol
 from makex.python_script import FileLocation
 
 
@@ -24,6 +25,12 @@ def _trim_output(output: str):
     if len(output) > 20:
         return output[:20] + "..."
     return output
+
+
+class FileLocationProtocol:
+    line: int
+    column: int
+    path: PathLike
 
 
 class CommandOutput:
@@ -72,24 +79,11 @@ class CommandProtocol(Protocol):
         pass
 
 
-class FileLocationProtocol:
-    line: int
-    column: int
-    path: PathLike
-
-
 class StringProtocol(Protocol):
     location: FileLocationProtocol
 
     def __str__(self):
         ...
-
-    def __fspath__(self):
-        ...
-
-
-class PathProtocol(Protocol):
-    location: FileLocationProtocol
 
     def __fspath__(self):
         ...
@@ -105,10 +99,10 @@ class TargetRequirementProtocol:
 
 class WorkspaceProtocol(Protocol):
     # Path of the workspace, a directory.
-    path: Path
+    path: PathProtocol
 
     # File which this workspace was defined
-    file: Path
+    file: PathProtocol
 
     # short readable name [a-zA-Z_][a-zA-Z0-9\-._@]+
     # used in workspace prefixes
@@ -133,7 +127,7 @@ class TargetProtocol(Protocol):
 
     # which file it was defined in
     # duplicate of location?
-    build_file: Path
+    build_file: PathlibPath
 
     location: FileLocationProtocol
 
@@ -155,7 +149,8 @@ def hash_target(obj: TargetRequirementProtocol) -> str:
 
 @dataclass(frozen=True)
 class FileStatus:
-    path: Path
+    # TODO: not a protocol
+    path: PathlibPath
     error: Exception = None
     checksum: FileChecksum = None
     location: FileLocation = None
@@ -168,7 +163,7 @@ class FileStatus:
 
 
 class FileChecksumFunction(Protocol):
-    def __call__(self, file: Path) -> str:
+    def __call__(self, file: PathlibPath) -> str:
         ...
 
 

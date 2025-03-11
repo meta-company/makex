@@ -19,7 +19,7 @@ TODO: provide built in tooling. load("//tools/makex/python/venv.mx.py","python_v
 python_venv_enter(environment=[":venv], )
 
 
-#task which creates a venv which we can use. similar args to task, but less.
+#Task which creates a venv which we can use. similar args to Task, but less.
 python_venv_task(
   name="venv"
   requirements_files=[],
@@ -45,10 +45,10 @@ To further increase verbosity, see the {option}`--verbose <makex --verbose>` opt
 
 At the moment, you'll need to fix your tool or wrap it in a script/executable that handles the error and returns a non-zero exit code.
 
-Simplistically, the pattern `(command) || true` is often used in shell scripts, but this is not recommended. A script discerning from real
-errors and spurious errors is required. 
+The pattern `(command) || true` is often used in shell scripts, but this is not recommended. 
+A wrapper script discerning from real errors and spurious errors may be required. 
 
-This is a common problem with a number of tools (e.g. mypy); and oftentimes, the tool itself should be fixed.
+This is a common problem with several tools (e.g. mypy); and oftentimes, the tool itself should be fixed.
 
 ### I see lines starting with `ERROR OUTPUT:` when running makex
 

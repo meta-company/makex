@@ -8,7 +8,7 @@ The intent of this feature is to explore ideas in build systems.
 This feature may be disabled or removed.
 ```
 
-Macros allow defining functions that create tasks or return values.
+Macros allow defining functions that create Tasks or return values.
 
 For example, in a Makex File:
 

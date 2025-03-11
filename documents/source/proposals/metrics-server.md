@@ -3,7 +3,7 @@ status: "Draft"
 ---
 # Metrics Server
 
-Consider exposing metrics over a client/server/http connection.
+Consider exposing metrics over a client/server/http connection (when running as a server).
 
 ## Metrics Format
 
@@ -42,7 +42,7 @@ There is always a largest bucket with infinite maximum value {le="Inf"} which wi
 - `makex_actions_executed_total{type="execute|write|..."}`: Number of actions executed by type.
 - `makex_executable_executions{path="/usr/bin/..."}`: Total number of executions by 
 - `makex_memory_usage`: Current memory usage in bytes
-- `makex_tasks_executed_total`: Total number of tasks run.
+- `makex_tasks_executed_total`: Total number of Tasks run.
 - `makex_tasks_executing`: Tasks currently executing.
 - `makex_tasks_waiting`: Tasks currently waiting.
 - `makex_total_memory`: Total memory available.

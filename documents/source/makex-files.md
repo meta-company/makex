@@ -12,8 +12,7 @@ The name of the Makex File should be one of the following:
 <!-- `Build`
 - `BUILD` -->
 
-The default names to search can be changed with the {data}`makex.makex_files<TOML.makex.makex_files>` configurable.
-
+The default names to search can be changed with the {confval}`makex.makex_files` configurable.
 
 <!--
 The name of a file can be specified absolutely.
@@ -33,28 +32,20 @@ magic marker to see if they are a Makex file and the first Makex-looking file wi
 Makex Files are a restricted subset of {ref}`The Python Programming Language<python:reference-index>`.
 See the {ref}`differences<python-differences>` for more details.
 
-```{tip}
+:::{tip}
 Keep your Makex Files simple. Don't be too clever. 
 
 The Makex file format/language is designed to be simple (simpler than Python) and easy/fast to process (almost statically, if necessary).
 
 Makex files are designed to evaluate quickly without running subprocesses.
-```
+:::
 
-
-## Magic marker/Hashbang/Shebang
-
-A marker `#!makex` at the top of the file both serves to mark the file as a script and to differentiate makex files from other types of files.
-
-At the moment, this marker is entirely optional.
-
-```python
-#!makex
-```
-
-The word `makex` can be anywhere on the line after the `#!`.
 
 ## Commenting
+
+Comments are identical to python.
+
+Example of the syntax below:
 
 ```python
 
@@ -68,14 +59,8 @@ multiline comment.
 
 ## Strings
 
-Strings are defined as in Python, surrounded by quotation markers (`'` or `"`). 
+Strings are the same syntax as in Python, surrounded by quotation markers (`'` or `"`). 
 Multiline strings may be surrounded by triple quotation markers (`"""` or `'''`).
-
-Quotation marks prefixed with the letter `f` denote a formatted string (For example, `f"Example string"`). 
-Formatted strings may contain placeholders for variables that shall be rendered when necessary. 
-For example, `f"Hello {name}"`, defines a string with a placeholder called `name`.
-
-Depending on how formatting strings are defined and used, their rendering may be deferred. This allows embedding references or paths in strings which can be expanded correctly. Typically, a formatted string with any type of `UnresolvedPath` objects can not be rendered outside the scope of a task definition.
 
 String objects defined in Makex files have the following structure:
 
@@ -92,9 +77,19 @@ String objects defined in Makex files have the following structure:
     :rtype: String
 ```
 
-```{note}
+:::{note}
 A wide range of built-in methods for {py:class}`Python strings <str>` and other primitive types (such as  {py:class}`lists <list>` and  {py:class}`dictionaries <dict>`) are not defined or enabled.
-```
+:::
+
+## Formatted Strings
+
+Quotation marks prefixed with the letter `f` denote a formatted string (For example, `f"Example string"`).
+Formatted strings may contain placeholders for variables that shall be rendered when necessary.
+For example, `f"Hello {name}"`, defines a string with a placeholder called `name`.
+
+Depending on how formatting strings are defined and used, their rendering may be deferred.
+This allows embedding references or paths in formatted strings which can be expanded correctly.
+A formatted string with any type of `UnresolvedPath` objects can not be rendered outside the scope of a Task definition.
 
 ## Lists
 
@@ -186,22 +181,33 @@ alist = [
 
 # bad 
 task(
-    name="bad", requires=[
-        ":bad", ":Bad"
+    name="example1", requires=[
+        "bad", "Bad"
     ],
     ...
 )
 
 # good
 task(
-    name="bad",
+    name="example1",
     requires=[
-        ":bad", 
-        ":Bad",
+        "bad", 
+        "Bad",
     ],
     ...
 )
 
 ```
 
+## Magic marker/Hashbang/Shebang
 
+A marker
+`#!makex` at the top of the file both serves to mark the file as a script and to differentiate makex files from other types of files.
+
+At the moment, this marker is entirely optional.
+
+```python
+#!makex
+```
+
+The word `makex` can be anywhere on the line after the `#!`.

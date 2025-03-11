@@ -13,7 +13,7 @@ from typing import (
     Optional,
 )
 
-from makex.target import EvaluatedTask
+from makex.target import Task
 
 ConstraintName = Literal["memory:minimum"]
 
@@ -192,6 +192,13 @@ class Linux:
 
 
 class SystemState:
+    """
+    This object is constructed frequently:
+    - At executor initialization.
+    - Any time a task is completed.
+    - Any time a task is started.
+    - The moment before a task is started.
+    """
     # free memory. less than total.
     free_memory: int
 
@@ -252,7 +259,7 @@ class SystemState:
 
 
 def can_run_task(
-    task: EvaluatedTask,
+    task: Task,
     options: ConstraintOptions,
     state: SystemState,
 ) -> Response:

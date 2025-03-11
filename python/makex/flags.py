@@ -3,6 +3,11 @@ Dynamic flags.
 """
 from os import environ
 
+from makex.constants import (
+    SYNTAX_2024,
+    SYNTAX_2025,
+)
+
 _SENTINEL = object()
 
 
@@ -21,7 +26,7 @@ def _get_bool(name, default: bool = _SENTINEL, prefix="MAKEX_", environ=environ)
         return False
 
 
-def _get_string(name, default: bool = _SENTINEL, prefix="MAKEX_", environ=environ) -> bool:
+def _get_string(name, default: str = _SENTINEL, prefix="MAKEX_", environ=environ) -> bool:
     v = environ.get(f"{prefix}{name}", None)
     if v is None:
         if default is not _SENTINEL:
@@ -125,6 +130,14 @@ SCHEDULE_DEBUG_ENABLED = _get_bool("SCHEDULE_DEBUG_ENABLED", False)
 
 # Enable reading makex config files from the current working directory or any ancestors.
 READ_CONFIG_FROM_PARENTS = _get_bool("READ_CONFIG_FROM_PARENTS", False)
+
+# Set the makex syntax version
+# See the breaking changes document for more information
+# TODO: SYNTAX_2025: switch this to 2 once we confirm reversing of locators and requires list migration flags.
+MAKEX_SYNTAX_VERSION = _get_string("SYNTAX", SYNTAX_2025)
+
+# internal or shutil
+COPY_LIBRARY = _get_string("COPY_LIBRARY", "internal")
 
 # Strict mode
 # - Disable the shell (unless really explicit)

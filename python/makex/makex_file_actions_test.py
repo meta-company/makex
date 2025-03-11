@@ -2,7 +2,10 @@ import os
 import tarfile
 
 import pytest
-from makex.constants import OUTPUT_DIRECTORY_NAME
+from makex.constants import (
+    OUTPUT_DIRECTORY_NAME,
+    SYNTAX_2025,
+)
 from makex.context import Context
 from makex.executor import Executor
 from makex.makex_file_parser import (
@@ -10,7 +13,7 @@ from makex.makex_file_parser import (
     parse_makefile_into_graph,
 )
 from makex.makex_file_types import (
-    ResolvedTaskReference,
+    TaskReference,
     TaskReferenceElement,
 )
 from makex.workspace import Workspace
@@ -26,6 +29,9 @@ def makex_context(tmp_path):
     ctx.workspace_object = _workspace
     ctx.workspace_cache.add(_workspace)
     ctx.cache = tmp_path / "makex_cache"
+
+    # TODO: SYNTAX_2025: switch this to version 2 for all tests early.
+    ctx.makex_syntax_version = SYNTAX_2025
     return ctx
 
 
@@ -48,7 +54,7 @@ task(
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -114,7 +120,7 @@ task(
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -154,10 +160,10 @@ task(
 task(
     name="test",
     requires=[
-        ":source_task",
+        "source_task",
     ],
     steps=[
-        copy(":source_task"),
+        copy("source_task:"),
     ],
 )
     """
@@ -168,7 +174,7 @@ task(
     graph = makex_context.graph
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -209,7 +215,7 @@ task(
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -237,10 +243,10 @@ def test_execute_task_output(tmp_path, makex_context):
 task(
     name="test",
     requires=[
-        "//tool:executable"
+        "executable://tool"
     ],
     steps=[
-        execute("//tool:executable", task_path("test") / "test-1234"),
+        execute("executable://tool", task_path("test") / "test-1234"),
     ],
     outputs=[
         task_path('test')/'test-1234'
@@ -254,9 +260,9 @@ task(
     name="executable",
     steps=[
         write("example.sh", '''#!/bin/sh\\necho "$(basename $1)" > $1'''),
-        execute("chmod", "+x", task_path('executable')/"example.sh")
+        execute("chmod", "+x", self.path/"example.sh")
     ],
-    outputs=task_path('executable')/'example.sh'
+    outputs=self.path/'example.sh'
 )    
 """
     tool_makefile_path = tmp_path / "tool" / "Makexfile"
@@ -267,18 +273,18 @@ task(
     graph = makex_context.graph
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
     a = graph.get_target(ref_a)
     assert a
 
-    ref_b = ResolvedTaskReference("executable", tool_makefile_path)
+    ref_b = TaskReference("executable", tool_makefile_path)
     b = graph.get_target(ref_b)
     assert b
 
     e = Executor(makex_context, workers=1, graph=graph)
     executed, errors = e.execute_targets(a)
 
-    assert not errors
+    assert not errors, f"Errors: {errors[0]}"
     assert executed
 
     base = tmp_path / OUTPUT_DIRECTORY_NAME / "test"
@@ -304,7 +310,7 @@ task(
         # "//tool:executable"
     ],
     steps=[
-        execute("//tool:executable", task_path("test") / "test-1234"),
+        execute("executable://tool", task_path("test") / "test-1234"),
     ],
     outputs=[
         task_path('test')/'test-1234'
@@ -331,7 +337,7 @@ task(
     graph: TargetGraph = makex_context.graph
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
     a = graph.get_target(ref_a)
     print(a.requires)
     assert a
@@ -357,7 +363,7 @@ task(
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -402,7 +408,7 @@ task(
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
 
-    a = graph.get_target(ResolvedTaskReference("test", makefile_path))
+    a = graph.get_target(TaskReference("test", makefile_path))
     assert a
 
     e = Executor(makex_context, workers=1, graph=result.graph)
@@ -445,7 +451,7 @@ task(
     graph = makex_context.graph
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -469,20 +475,19 @@ def test_archive2(tmp_path, makex_context):
 
     """
     makefile_path = tmp_path / "Makexfile"
+    ARCHIVE_NAME = "project.tar.gz"
 
-    file = """
-    
+    file = f"""
 task(
     name="build-archive",
-    requires=[":build"],
+    requires=["build"],
     steps=[
         # create an archive of the build task outputs
         # TODO: we should not need to pass root here. the list of files (and the task_path() argument) should provide the roots.
         #  archiving the files as they are in the fs without a root doesn't really make sense in the context of makex.
         archive(
-          path="project.tar", 
-          root=task_path("build"),
-          files=[
+          path="{ARCHIVE_NAME}", 
+          items=[
             find(task_path("build")),
           ]
         ),
@@ -501,7 +506,7 @@ task(
     graph = makex_context.graph
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("build-archive", makefile_path)
+    ref_a = TaskReference("build-archive", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -514,7 +519,7 @@ task(
 
     # read the archive created and check the member paths
     with tarfile.open(
-        makex_context.graph_2.get_task2("build-archive", makefile_path).cache_path / "project.tar"
+        makex_context.graph_2.get_task2("build-archive", makefile_path).cache_path / ARCHIVE_NAME
     ) as f:
         print(f.getnames())
         assert f.getnames() == ["./test.txt"]
@@ -539,7 +544,7 @@ task(
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a
@@ -587,7 +592,7 @@ task(
     graph = TargetGraph()
 
     result = parse_makefile_into_graph(makex_context, makefile_path, graph)
-    ref_a = ResolvedTaskReference("test", makefile_path)
+    ref_a = TaskReference("test", makefile_path)
 
     a = graph.get_target(ref_a)
     assert a

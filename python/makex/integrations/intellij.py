@@ -1,3 +1,33 @@
+def load_configuration(d):
+    intellij_options = d.pop("intellij", None)
+
+    if not intellij_options:
+        return
+
+    select_run = intellij_options.get("select_run", None)
+    if not select_run:
+        return
+
+    if isinstance(select_run, list) is False:
+        raise ConfigurationValueError(
+            f"Invalid type. Expected list. Got {type(select_run)}", select_run
+        )
+
+    # TODO: validate the list
+    for selector in select_run:
+        pass
+
+
+def intellig_arguments(subparser):
+    subparser.add_argument(
+        "--select-run",
+        help=(
+            "A query expression to select specific tasks to integrate with intellij run configurations. "
+            "e.g. tag:tag_name. Default expressions can be configured in a Makex configuration file [makex.intellij]."
+        ),
+    )
+
+
 def main_intellij(args, extra_args):
     """
     path -- {extra_args}

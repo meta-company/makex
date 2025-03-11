@@ -142,3 +142,10 @@ PASS_GLOBALS_TO_INCLUDE = False
 
 # the marker/character between a path and a task in task locators
 TASK_PATH_NAME_SEPARATOR = ":"
+
+# the marker used to prefix an absolute workspace path
+ABSOLUTE_WORKSPACE = "//"
+
+SYNTAX_2024 = "2024"
+
+SYNTAX_2025 = "2025"

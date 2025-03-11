@@ -39,25 +39,30 @@ def is_ansi_tty() -> bool:
     if pattern.match(term):
         return False
 
-    return tty
+    if force := os.environ.get("FORCE_COLOR", None):
+        return True
+
+    if ls_colors := os.environ.get("LS_COLORS", None):
+        return True
+
+    return False
 
 
 class UI:
     def __init__(self, verbosity=None, colors=NoColors):
         self.colors = colors
         self.verbosity = verbosity or 0
+        self.warnings = []
 
     def warn(self, message, location: FileLocation = None):
-
         _location = ""
         if location:
             _location = f"@ {location}"
         print(
-            f"{self.colors.MAKEX}[makex]{self.colors.RESET}{self.colors.WARNING}[WARNING]{self.colors.RESET}: {message}{_location}"
+            f"{self.colors.MAKEX}[makex]{self.colors.RESET}{self.colors.WARNING}[WARNING]{self.colors.RESET}: {message}{_location}",
+            flush=True
         )
-
-    def error(self, message):
-        print(message, file=sys.stderr)
+        self.warnings.append((message, location))
 
     def progress(self):
         pass
