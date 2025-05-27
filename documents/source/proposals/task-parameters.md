@@ -59,3 +59,6 @@ task(
 )
 ```
 
+### Interactive parameters
+
+If a task is run, and parameters are not provided, Makex may request the values interactively.

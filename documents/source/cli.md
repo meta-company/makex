@@ -11,10 +11,6 @@
 At the moment, the global flags must be specified AFTER the [sub]command.
 ```
 
-```{note}
-Makex installs a copy of itself with the alias `mx`.
-```
-
 ## Commands
 
 Makex has several commands.

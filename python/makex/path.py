@@ -108,6 +108,16 @@ class PathWithLocation:
     def anchor(self):
         return self._path.anchor
 
+    def is_relative_to(self, other: "PathWithLocation"):
+        if isinstance(other, PathWithLocation):
+            return self._path.is_relative_to(other._path)
+        return self._path.is_relative_to(other)
+
+    def relative_to(self, other: "PathWithLocation"):
+        if isinstance(other, PathWithLocation):
+            return self._path.relative_to(other._path)
+        return self._path.relative_to(other)
+
     def is_absolute(self):
         return self._path.is_absolute()
 

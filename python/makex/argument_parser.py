@@ -29,6 +29,10 @@ class _Argument:
     default: None
     required: bool
 
+    # extra data associated with the command/parser
+    # used for shtab (to set a completer function for a specific argument, extra["complete"] = {"bash":"", "zsh": ""})
+    extra: dict[str, Any]
+
     def __init__(
         self,
         name=None,
@@ -40,6 +44,7 @@ class _Argument:
         help=None,
         type=None,
         required=True,
+        extra=None,
     ):
         """
             Note: name and long/short are mutually exclusive.
@@ -62,6 +67,7 @@ class _Argument:
         self.help = help
         self.type = type
         self.required = required
+        self.extra = extra or {}
 
     def add_to_parser(self, _parser: argparse.ArgumentParser, root=False):
         kwargs = {
@@ -75,15 +81,22 @@ class _Argument:
             if self.required is False:
                 kwargs["nargs"] = "?"
 
-            _parser.add_argument(dest=self.name, **kwargs)
+            _action = _parser.add_argument(dest=self.name, **kwargs)
         else:
             # XXX: must be expanded like this because argparse is goofy (aka fucked up).
             if self.long and self.short:
-                _parser.add_argument(self.short, self.long, **kwargs)
+                _action = _parser.add_argument(self.short, self.long, **kwargs)
             elif self.short:
-                _parser.add_argument(self.short, **kwargs)
+                _action = _parser.add_argument(self.short, **kwargs)
             elif self.long:
-                _parser.add_argument(self.long, **kwargs)
+                _action = _parser.add_argument(self.long, **kwargs)
+            else:
+                raise ValueError(
+                    "Invalid argument combination for argparse. Missing .long and .short"
+                )
+
+            for k, v in self.extra.items():
+                setattr(_action, k, v)
 
 
 class _Command:
@@ -92,13 +105,15 @@ class _Command:
     aliases: list[str]
     commands: list["_Command"]
     arguments: list["_Argument"]
+    defaults: dict[str, Any]
 
-    def __init__(self, name, help, aliases=None):
+    def __init__(self, name, help, aliases=None, defaults=None):
         self.name = name
         self.help = help
         self.aliases = aliases or []
         self.arguments = []
         self.commands = []
+        self.defaults = defaults or {}
 
     class _Args(TypedDict):
         name: str
@@ -114,13 +129,15 @@ class _Command:
         type: Any
         required: bool
 
+        extra: dict[str, Any]
+
     def add_argument(self, **kwargs: _Args):
         # TODO: if name is set and required=False, check that prior arguments are also required=False. err if not.
         # TODO: long=None, short=None, nargs=None, action=None, default=None
         self.arguments.append(_Argument(**kwargs))
 
-    def add_subcommand(self, name, help=None, aliases=None) -> "_Command":
-        command = _Command(name, help, aliases)
+    def add_subcommand(self, name, help=None, aliases=None, defaults=None) -> "_Command":
+        command = _Command(name, help=help, aliases=aliases, defaults=defaults)
         self.commands.append(command)
         return command
 
@@ -135,6 +152,8 @@ def _create_parser(
         add_help=documentation is False,
         formatter_class=formatter,
     )
+    _parser.set_defaults(**command.defaults)
+
     for argument in command.arguments:
         argument.add_to_parser(_parser, root=True)
 

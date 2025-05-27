@@ -1,8 +1,6 @@
 import ast
 import re
 import types
-import typing
-from io import StringIO
 from itertools import chain
 from os.path import expanduser
 from pathlib import Path
@@ -21,7 +19,11 @@ from makex._logging import (
     trace,
 )
 from makex.actions.archive import Archive
+from makex.actions.copy import Copy
+from makex.actions.environment import SetEnvironment
 from makex.actions.erase import Erase
+from makex.actions.execute import Execute
+from makex.actions.mirror import Mirror
 from makex.actions.shell import Shell
 from makex.actions.write import Write
 from makex.build_path import get_build_path
@@ -36,7 +38,6 @@ from makex.context import Context
 from makex.errors import (
     ErrorCategory,
     ErrorLevel,
-    MakexError,
 )
 from makex.file_checksum import FileChecksum
 from makex.flags import (
@@ -59,12 +60,8 @@ from makex.flags import (
 )
 from makex.locators import parse_task_reference
 from makex.makex_file_actions import (
-    Copy,
-    Execute,
     InternalAction,
-    Mirror,
     Print,
-    SetEnvironment,
 )
 from makex.makex_file_ast import (
     InsertAST,
@@ -149,7 +146,6 @@ from makex.target import (
     format_hash_key,
     target_hash,
 )
-from makex.ui import pretty_file
 from makex.version import VERSION
 
 MAKEX_GLOBAL_TARGETS = "_TARGETS_"
@@ -329,7 +325,7 @@ class TaskObject:
         path: Union[StringValue, PathElement] = None,
         requires=None,
         run=None,
-        inputs=None,
+        inputs: dict[str, list[str]] = None,
         outputs=None,
         build_path=None,
         outputs_dict=None,
@@ -474,41 +470,6 @@ def resolve_task_output_path(ctx, target: TargetProtocol) -> tuple[Path, Path]:
     return target_output_path, real_path
 
 
-class MakexFileCycleError(MakexError):
-    detection: TaskObject
-    cycles: list[TaskObject]
-
-    def __init__(self, message, detection: TaskObject, cycles: list[TaskObject]):
-        super().__init__(message)
-        self.message = message
-        self.detection = detection
-        self.cycles = cycles
-
-    def pretty(self, ctx: Context) -> str:
-        string = StringIO()
-        string.write(
-            f"{ctx.colors.ERROR}ERROR:{ctx.colors.RESET} Cycles detected between targets:\n"
-        )
-        string.write(f" - {self.detection.key()} {self.detection}\n")
-
-        if self.detection.location:
-            string.write(pretty_file(self.detection.location, ctx.colors))
-
-        first_cycle = self.cycles[0]
-        string.write(f" - {first_cycle.key()}\n")
-
-        if first_cycle.location:
-            string.write(pretty_file(first_cycle.location, ctx.colors))
-
-        stack = self.cycles[1:]
-        if stack:
-            string.write("Stack:\n")
-            for r in stack:
-                string.write(f" - {r}\n")
-
-        return string.getvalue()
-
-
 def find_makex_files(path, names) -> Optional[Path]:
     for name in names:
         check = path / name
@@ -541,9 +502,11 @@ def _process_output(
     location,
 ) -> Union[PathElement, TaskPath, Glob]:
     # Mostly return the outputs, as is, for later evaluation. Check for invalid arguments early.
-    if isinstance(output, StringValue):
+    if isinstance(output, (StringValue)):
         return PathElement(output, location=output.location)
-    elif isinstance(output, (Glob, PathElement, TaskSelfPath, TaskPath)):
+    elif isinstance(
+        output, (Glob, PathElement, TaskSelfPath, TaskPath, ListValue, list, JoinedString)
+    ):
         # Append as is. we'll resolve later.
         return output
     else:
@@ -655,6 +618,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
             "Task": self._function_task,
             MAKEX_FUNCTION_TASK: self._function_task,
             _TARGET_REFERENCE_NAME: wrap_script_function(self._function_Reference),
+            "reference": wrap_script_function(self._function_reference),
             _MACRO_DECORATOR_NAME: self._decorator_macro, #"macro": Decorator,
         }
 
@@ -875,6 +839,17 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         _dictionary.update(**kwargs)
         return SetEnvironment(_dictionary, location=location)
 
+    def _function_reference(self, name, path: PathLikeTypes = None, location=None, **kwargs):
+        # absorb kwargs so we can error between Target and target
+        if path is None:
+            path = self.makex_file.directory
+
+        return TaskReferenceElement(
+            name=name,
+            path=StringValue(path, location=location),
+            location=location,
+        )
+
     def _function_Reference(self, name, path: PathLikeTypes = None, location=None, **kwargs):
         # absorb kwargs so we can error between Target and target
         if path is None:
@@ -928,7 +903,7 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
     def _function_task_self_inputs(self, name: StringValue = None, location=None, **kwargs):
         return TaskSelfInput(name, location=location)
 
-    def _function_task_self_outputs(self, name: StringValue, location=None, **kwargs):
+    def _function_task_self_outputs(self, name: StringValue = None, location=None, **kwargs):
         return TaskSelfOutput(name, location=location)
 
     def _function_task_path(
@@ -1170,7 +1145,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
         # keep a set to make sure we report/return unique items as some of them may be added implicitly
         _yielded = set()
 
-        debug("Target requirements using version %r", self._syntax)
         # TODO: SYNTAX_2025: fix all this:
         for implicit, require in requirements:
             if isinstance(require, StringValue):
@@ -1327,7 +1301,6 @@ class MakexFileScriptEnvironment(ScriptEnvironment):
 
         location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME, None)
 
-        debug("TEST: %s", location)
         if args:
             raise PythonScriptError(
                 "task() function must be called with keyword arguments only.", location

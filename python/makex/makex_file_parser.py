@@ -32,7 +32,10 @@ from makex.constants import (
     TASK_PATH_NAME_SEPARATOR,
 )
 from makex.context import Context
-from makex.errors import ExecutionError
+from makex.errors import (
+    ExecutionError,
+    MakexFileCycleError,
+)
 from makex.flags import (
     INCLUDE_MULTIPLE_LEVEL_ENABLED,
     MAKEX_SYNTAX_VERSION,
@@ -43,7 +46,6 @@ from makex.makex_file import (
     MAKEX_GLOBAL_MACROS,
     MAKEX_GLOBAL_TARGETS,
     MakexFile,
-    MakexFileCycleError,
     MakexFileScriptEnvironment,
     TaskObject,
     find_makex_files,

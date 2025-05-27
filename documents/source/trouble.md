@@ -3,35 +3,6 @@
 
 ## Tips
 
-<!-- ### Python Virtual Environments
-
-Show an example of using the environment function to modify a PATH and variables to enter a venv.
-
-environment({
-  "PATH": posix_path_add(".venv/bin", before=True), 
-  "PATH": Environment.get("PATH").prepend(".venv/bin", ":",)
-  # ...
-})
-
-TODO: provide built in tooling. load("//tools/makex/python/venv.mx.py","python_venv_enter", python_venv_enter="pyvenv")
-
-# runnable to enter a venv for later executables. This will fix/adjust the path environment automatically.
-python_venv_enter(environment=[":venv], )
-
-
-#Task which creates a venv which we can use. similar args to Task, but less.
-python_venv_task(
-  name="venv"
-  requirements_files=[],
-  packages=[], # list of packages we need to install
-  steps=[
-    # custom stuff to run after we have a venv inside a venv.
-  ]
-)
-
--->
-
-
 (increasing-verbosity)=
 ### Increasing Verbosity 
 
@@ -43,7 +14,7 @@ To further increase verbosity, see the {option}`--verbose <makex --verbose>` opt
 
 ### My program completes successfully, but still has a non-zero exit code.
 
-At the moment, you'll need to fix your tool or wrap it in a script/executable that handles the error and returns a non-zero exit code.
+At the moment, you'll need to fix your tool or wrap it in a script/executable that handles the error and returns a exit code of zero (0).
 
 The pattern `(command) || true` is often used in shell scripts, but this is not recommended. 
 A wrapper script discerning from real errors and spurious errors may be required. 
@@ -54,7 +25,7 @@ This is a common problem with several tools (e.g. mypy); and oftentimes, the too
 
 Makex prefixes any errors written to the standard error output (stderr) by subprocesses with `ERROR OUTPUT:`. This helps identify problems quickly.
 
-If you don't want to see these messages, address the warnings, use a flag to quiet, or improve the executable you are trying to run.
+If you don't want to see these messages, address the warnings, use a flag to quiet, or improve the executable you are trying to run by only emitting to standard output.
 
 ### Makex seems slow handling large files
 

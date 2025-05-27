@@ -15,19 +15,21 @@ The task function is as follows:
   
   :param String name: Name of the task.
       
-  :param list[PathLike] requires: A list of requirements. Can be files or other Tasks using a task locator or reference.
-    A string with a : will be parsed as a task reference. Any values which evaluated to None will be skipped.
+  :param list[PathLike] requires: A list of requirements (Task names or Locators). 
+    A string with a : will be parsed as a Task Locator. Any values which evaluate to None will be skipped.
     
-  :param list[Action | list[Action]] steps: A list of :ref:`actions`. These are actions/task/executables/scripts run in sequence as part of the task.
+  :param list[Action | list[Action]] steps: A list of :ref:`actions`. 
+    These are actions, executables, or scripts run in sequence as part of the task.
   
-  :param  PathLike | list[PathLike] | dict[String, PathLike] inputs: A file, list of files or mapping of existing files required by this task. 
+  :param  PathLike | list[PathLike] | dict[String, PathLike] inputs: 
+    A file, list of files or mapping of existing files required by this task. 
   
-  :param Union[PathLike, list[PathLike], dict[String, PathLike]] outputs: A file or list of the files this task outputs. 
+  :param Union[PathLike, list[PathLike], dict[String, PathLike]] outputs: A file or list of the files this task produces. 
     If a task produces any files that are to be consumed by any dependents of the task, they *should* be defined here. 
-    Defining outputs makes the task a candidate for caching.
+    Defining outputs makes the Task a candidate for caching.
   
-  :param Mapping[str, Union[String, PathLike,Number]] environment: Environment variables to set for the Tasks and any executables.
-    Values must be simple/immediate and serializable to strings. 
+  :param Mapping[str, Union[String, PathLike,Number]] environment: Environment variables to set for the Task and any executables it runs.
+    Values must be simple or immediate, and serializable to strings. 
 ```
 
 :::{todo}
@@ -64,15 +66,13 @@ task(
 
 task(
     name="hello",
-    requires=[
-    ],
     steps=[
         print("Hello")
     ],
 )
 ```
 
-Running the `world` task will run the `hello` task first (using `makex run :world`). The printed output will be:
+Running the `world` task will run the `hello` task first (using `makex run world`). The printed output will be:
 
 ```
 Hello

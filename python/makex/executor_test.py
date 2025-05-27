@@ -240,7 +240,8 @@ def test_input_ouput(tmp_path: Path):
     d = TaskObject(
         "d",
         path=opath(),
-        requires=[ipath("d")],
+        inputs={"_": [ipath("d")]},
+        requires=[],
         outputs=[opath("d")],
         run=[write("d")],
         location=location,
@@ -249,7 +250,8 @@ def test_input_ouput(tmp_path: Path):
     b = TaskObject(
         "b",
         path=opath(),
-        requires=[ipath("b"), d],
+        requires=[d],
+        inputs={"_": [ipath("b")]},
         outputs=[opath("b")],
         run=[write("b")],
         location=location,
@@ -258,7 +260,8 @@ def test_input_ouput(tmp_path: Path):
     c = TaskObject(
         "c",
         path=opath(),
-        requires=[ipath("c"), d],
+        requires=[d],
+        inputs={"_": [ipath("c")]},
         outputs=[opath("c")],
         run=[write("c")],
         location=location,
@@ -267,7 +270,8 @@ def test_input_ouput(tmp_path: Path):
     a = TaskObject(
         "a",
         path=opath(),
-        requires=[ipath("a"), b, c],
+        requires=[b, c],
+        inputs={"_": [ipath("a")]},
         outputs=[opath("d")],
         run=[write("a")],
         location=location,

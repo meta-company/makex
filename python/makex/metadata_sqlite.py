@@ -7,7 +7,10 @@ from datetime import (
 from pathlib import Path
 from typing import Optional
 
-from makex._logging import debug, info
+from makex._logging import (
+    debug,
+    info,
+)
 from makex.file_checksum import FileChecksum
 
 DATABASE_VERSION = 3
@@ -34,6 +37,7 @@ def upgrade_3(backend: "SqliteMetadataBackend"):
         "CREATE TABLE IF NOT EXISTS files (path TEXT, fingerprint TEXT, checksum_type TEXT, checksum TEXT,  date TEXT)"
     )
     backend._execute(f"PRAGMA user_version=3")
+
 
 class SqliteMetadataBackend:
     def __init__(self, path: Path):

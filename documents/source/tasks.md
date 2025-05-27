@@ -60,7 +60,7 @@ A task may define paths to files it requires (the Task's Input Files).
 
 The `inputs` argument to the {py:func}`task` function may be used to define these files.
 
-The input files may be a list path names. or it may be a mapping of name to one or more paths (see [Naming Input Files](#naming-input-files)).
+The input files may be a list path names, or it may be a mapping of name to one or more paths (see [Naming Input Files](#naming-input-files)).
 Input files may also be the results of functions that find files.
 
 Paths may be explicit Strings, or they be found using the `glob` or `find` functions.
@@ -229,8 +229,8 @@ task(
         copy(self.inputs.input1),
         
         # referencing a name in self.outputs writing to task output:
-        # will write "test" to "output1.txt".
-        write(self.outputs.output1, self.name)
+        # will write "example\n" to "output1.txt".
+        write(self.outputs.output1, f"{self.name}\n")
     ],
 )   
 ```
@@ -239,7 +239,7 @@ If any named inputs/outputs are defined as a list, accessing `self.inputs.name` 
 You may not access members of the list individually (For example, using the index operation `self.inputs.example[index]`).
 
 You may not reference a named output containing results of {py:func}`glob` or {py:func}`find`.
-You may not reference a named output or assigned to the results of {py:func}`glob` or {py:func}`find`.
+You may not reference a named output assigned to the results of {py:func}`glob` or {py:func}`find`.
 
 ### Optional Requirements
 
@@ -265,7 +265,7 @@ task(
 )
 ```
 
-or:
+Or:
 
 ```python
 COMPONENTS = [

@@ -248,7 +248,7 @@ def script_object(type):
     return inner
 
 
-def get_script_object_type(obj) -> Optional[int]:
+def script_object_type(obj) -> Optional[int]:
     """
     Get the node type as defined by the script_node decorator.
     

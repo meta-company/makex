@@ -334,7 +334,7 @@ class TaskSelfPath(UnresolvedPath):
         self.parts = parts or []
 
     def __truediv__(self, other):
-        if isinstance(other, StringValue):
+        if isinstance(other, (JoinedString, StringValue)):
             return TaskSelfPath(
                 location=other.location,
                 parts=[*self.parts, other],
@@ -343,7 +343,7 @@ class TaskSelfPath(UnresolvedPath):
     def join(self, *parts, **kwargs):
         location = kwargs.pop(FILE_LOCATION_ARGUMENT_NAME)
         for part in parts:
-            if isinstance(part, StringValue):
+            if isinstance(part, (JoinedString, StringValue)):
                 continue
             else:
                 raise PythonScriptError(

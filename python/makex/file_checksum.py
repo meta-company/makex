@@ -55,7 +55,8 @@ TEST_KEY = b"user.test"
 TEST_VALUE = b"test"
 
 # hash will be stored in XATTR_PREFIX.algorithm
-XATTR_PREFIX="user.checksum"
+XATTR_PREFIX = "user.checksum"
+
 
 def get_digest_data(data: BinaryIO, hash_func=hashlib.sha256):
     h = hash_func()
@@ -169,8 +170,9 @@ class FileChecksum:
         try:
             set_xattr(path, f"{XATTR_PREFIX}.{type.value}", bytes(f"{d}:{fingerprint}", "ascii"))
         except OSError as e:
+            # TODO: improve this
             logging.error(e)
-            pass
+            #raise e
 
         return cls(type, d, fingerprint)
 
@@ -299,7 +301,7 @@ class FileChecksum:
                 if get_xattr(fname, TEST_KEY) == TEST_VALUE:
                     remove_xattr(fname, TEST_KEY)
                     result = True
-            except (OSError,IOError) as e:
+            except (OSError, IOError) as e:
                 logging.exception(e)
                 result = False
 
@@ -385,4 +387,3 @@ def get_attributes(
         pass
 
     return csum, csum_fingerpint, fingerprint
-

@@ -17,7 +17,7 @@ VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions (YYYYMMSS[equence]).
-VERSION = "20250301"
+VERSION = "20250501"
 
 CHANGE = Environment.get("CHANGE", "")
 
@@ -163,7 +163,8 @@ task(
 # create a venv
 task(
     name="venv",
-    requires=[
+    requires=[],
+    inputs=[
         PYPROJECT_TOML,
     ],
     outputs=[
@@ -228,11 +229,28 @@ task(
         "venv",
     ],
     steps=[
-        shell(
-            f"source {VENV}/bin/activate",
-            f"pytest -o cache_dir={self.path}/pytest python",
-        )
+        execute(
+            f"{VENV}/bin/pytest",
+            "-o",
+            f"cache_dir={self.path}/pytest python",
+        ),
     ]
+)
+
+task(
+    name="benchmark",
+    requires=["venv"],
+    steps=[
+        execute(
+            f"{VENV}/bin/pytest",
+            "-o",
+            f"cache_dir={self.path}/pytest",
+            "--benchmark-only",
+            "--benchmark-verbose",
+            "--color=yes",
+            source("python"),
+        )
+    ],
 )
 
 
@@ -385,10 +403,12 @@ task(
 
         # TODO: use this instead
         #archive(
-        #    path=task_path("rpm") / "SOURCES/makex-source.zip",
+        #    path=self.path / "SOURCES/makex-source.zip",
         #    prefix=f"makex-{VERSION}",
-        #    files=[
-        #        "python"#
+        #    items=[
+        #       glob(task_path('source-package')/"*")
+        # or:
+        #       list_folder(task_path('source-package'))
         #    ]
         #),
         execute("rpmbuild", RPMBUILD_FLAGS, "-v", "-ba", "packaging/makex.spec"),

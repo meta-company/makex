@@ -7,7 +7,7 @@ name = "makex"
 dynamic = ["version"]
 description = "Build tool"
 readme = { file = "README.md", content-type = "text/markdown" }
-license = { text = "LicenseRef-MetaCompany-Source-License-2024-1" }
+license = { text = "MetaCompany Source License 2024-1" }
 # configuration error: `project` must not contain {'license-files'} properties
 # does not work per: https://peps.python.org/pep-0639/
 # license-files = ["LICENSE.md"]
@@ -76,8 +76,6 @@ test = [
 ]
 documents = [
     "sphinx",
-    "sphinx-better-theme",
-    "sphinx-notfound-page",
     "myst-parser",
     "markdown-it-py[linkify,plugins]"
 ]

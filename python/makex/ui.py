@@ -10,7 +10,17 @@ from makex.colors import (
     ColorsNames,
     NoColors,
 )
-from makex.python_script import FileLocation
+from makex.errors import (
+    ExecutionError,
+    ExternalExecutionError,
+    MakexFileCycleError,
+    MultipleErrors,
+)
+from makex.python_script import (
+    FileLocation,
+    PythonScriptError,
+    PythonScriptFileError,
+)
 
 
 def is_ansi_tty() -> bool:
@@ -144,3 +154,57 @@ def pretty_makex_file_exception(exception, location: FileLocation, colors: Color
                 buf.write(f">>{li}: " + line)
 
     return buf.getvalue()
+
+
+def early_ui_printer(max_level: int, colors: ColorsNames):
+    # we need an early ui before configuration/context is loaded
+    def f(message, level=1, error=False):
+        if error:
+            print(f"{colors.ERROR}ERROR:{colors.RESET} {message}")
+            return
+        if level <= max_level:
+            print(f"{colors.MAKEX}[makex]{colors.RESET} {message}")
+
+    return f
+
+
+def print_error(colors: ColorsNames, error):
+
+    if isinstance(error, (PythonScriptFileError, PythonScriptError)):
+        print(pretty_makex_file_exception(error, error.location, colors=colors))
+    elif isinstance(error, MakexFileCycleError):
+        print(format_cycle_error(error, colors=colors))
+    elif isinstance(error, MultipleErrors):
+        for error in error.errors:
+            print_error(colors, error)
+    elif isinstance(error, (ExecutionError, ExternalExecutionError)):
+        if error.location:
+            print(pretty_makex_file_exception(error.error, error.location, colors=colors))
+        else:
+            print("Execution Error:", error)
+    else:
+        print(f"{type(error)} Error:")
+        print(error)
+
+
+def format_cycle_error(self, colors: ColorsNames) -> str:
+    string = StringIO()
+    string.write(f"{colors.ERROR}ERROR:{colors.RESET} Cycles detected between targets:\n")
+    string.write(f" - {self.detection.key()} {self.detection}\n")
+
+    if self.detection.location:
+        string.write(pretty_file(self.detection.location, colors))
+
+    first_cycle = self.cycles[0]
+    string.write(f" - {first_cycle.key()}\n")
+
+    if first_cycle.location:
+        string.write(pretty_file(first_cycle.location, colors))
+
+    stack = self.cycles[1:]
+    if stack:
+        string.write("Stack:\n")
+        for r in stack:
+            string.write(f" - {r}\n")
+
+    return string.getvalue()

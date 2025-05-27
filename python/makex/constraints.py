@@ -15,7 +15,7 @@ from typing import (
 
 from makex.target import Task
 
-ConstraintName = Literal["memory:minimum"]
+ConstraintName = Literal["memory:minimum", "memory:maximum"]
 
 
 class Constraint:
@@ -33,8 +33,9 @@ class Constraint:
 
 
 class ConstraintOptions:
-    def __init__(self):
+    def __init__(self, domains: list[ConstraintName] = None):
         self._constraints = []
+        self.domains = domains or set()
 
     def add_constraint(self, constraint: Constraint):
         self._constraints.append(constraint)
@@ -263,6 +264,11 @@ def can_run_task(
     options: ConstraintOptions,
     state: SystemState,
 ) -> Response:
+
+    if not options.domains:
+        # no domains specified. skip constraint checking.
+        return Response(Runability.CONTINUE)
+
     total_memory = state.total_memory
     free_memory = state.free_memory
     task_memory_used = state.task_memory_used
@@ -271,7 +277,7 @@ def can_run_task(
     constraints = options.get_all(labels=task.labels)
     # check we are within memory thresholds...
 
-    if False:
+    if "memory:maximum" in options.domains:
         # check we don't exceed maximum memory
         maximum_memory = None
 
@@ -286,35 +292,36 @@ def can_run_task(
                 # wait until tasks finish/freeing up memory
                 return Response(Runability.DEFER)
 
-    # check the task has minimum memory available
-    # wait if possible for the memory to free up
-    minimum_memory = None
+    if "memory:minimum" in options.domains:
+        # check the task has minimum memory available
+        # wait if possible for the memory to free up
+        minimum_memory = None
 
-    if constraint := constraints.get("memory:minimum"):
-        minimum_memory = constraint.value
+        if constraint := constraints.get("memory:minimum"):
+            minimum_memory = constraint.value
 
-    if minimum_memory is not None:
-        if minimum_memory >= total_memory:
-            return Response(
-                Runability.ERROR,
-                message=f"Requires {minimum_memory} bytes. System only has {total_memory} installed.",
-            )
-
-        if minimum_memory <= free_memory:
-            if minimum_memory <= task_memory_used:
-                # memory is available, but it is being used by others
+        if minimum_memory is not None:
+            if minimum_memory >= total_memory:
                 return Response(
-                    Runability.DEFER,
-                    message="Wait for other tasks to free up memory resources.",
+                    Runability.ERROR,
+                    message=f"Requires {minimum_memory} bytes. System only has {total_memory} installed.",
                 )
 
-            # we can't free the memory used by other processes
-            return Response(
-                Runability.ERROR,
-                message=f"Requires {minimum_memory} bytes. System only has {total_memory} free.",
-            )
+            if minimum_memory <= free_memory:
+                if minimum_memory <= task_memory_used:
+                    # memory is available, but it is being used by others
+                    return Response(
+                        Runability.DEFER,
+                        message="Wait for other tasks to free up memory resources.",
+                    )
 
-    if False:
+                # we can't free the memory used by other processes
+                return Response(
+                    Runability.ERROR,
+                    message=f"Requires {minimum_memory} bytes. System only has {total_memory} free.",
+                )
+
+    if "cpu:maximum" in options.domains:
         # check we are within cpu threshold
         # TODO: not necessary. enforced by pool size
         maximum_cpus = None
@@ -322,12 +329,12 @@ def can_run_task(
             maximum_cpus = options.maximum_cpus
 
         if maximum_cpus is not None:
-            if ctx.tasks_running >= maximum_cpus:
+            if state.tasks_running >= maximum_cpus:
                 # wait until threads free up
                 return Response(Runability.DEFER)
 
         # check we are within CPU "load" threshold
-        one_minute_load_average = os.getloadavg()[0] / ctx.cpus
+        one_minute_load_average = os.getloadavg()[0] / state.cpus
 
     # Just let it continue/run...
     return Response(Runability.CONTINUE)

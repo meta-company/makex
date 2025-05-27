@@ -5,7 +5,7 @@ Makex provides a uniform filesystem based cache for all of a Task's outputs.
 
 The default location of the cache is `~/.cache/makex`. The location of this cache may be configured.
 
-When Makex and Tasks are run, a link to the cache folder (named `_output_`) is produced next to the Makex File in which Tasks are defined. This is a convenience, so that output files may be located and inspected easily.  
+When Makex and Tasks are run, a link to the cache folder (named `_output_`) is produced next to the Makex File in which Tasks are defined. This is a convenience, so that output files may be located and inspected easily. This path may change, and external tools should use the `makex path` command to retrieve the output path of a task.
 
 With the correct configuration, the cache may be shared by multiple processes of Makex; potentially running across different machines.
 
@@ -33,9 +33,9 @@ Automatically generated paths are stored into a cache with the following example
 - `~/.cache/makex/{workspace_id}/`: 
   - The Workspace in the cache.
 - `~/.cache/makex/{workspace_id}/_output_/{task_output_id}/`: 
-  - The output folder of a Task in the root directory of the Workspace (e.g. `//:{task_name}`).
+  - The output folder of a Task in the root directory of the Workspace (e.g. `{task_name}://`).
 - `~/.cache/makex/{workspace_id}/path/to/task/_output_/{task_output_id}/`:
-  - The output folder of a Task `//path/to/task:{task_name}` in the Workspace.
+  - The output folder of a Task `{task_name}://path/to/task` in the Workspace.
 
 
 <!-- `~/.cache/makex/{workspace-id}.sqlite`: A metadata file used to store state externally.-->

@@ -4,7 +4,16 @@ This document lists major releases and changes for the Makex project.
 
 Versions are identified by the pattern `YYYYMMSS` (A date with sequence number; year (`YYYY`), month (`MM`), sequence (`SS`)).
 
-## 20250201 (PENDING)
+## 20250501
+
+- Allow joined strings in output file paths.
+- Allow joining paths with joined strings.
+- Improve task requirements error reporting.
+- Handle slices in self references (e.g. `self.outputs["example"]` and `self.inputs["example"]`). This syntax is NOT preferred.
+- Allow joined strings in executable names.
+
+
+## 20250301
 
 - **BREAKING CHANGE**: Task Locator pattern reversal!
   - For example, `//path:task_name` it is now `task_name://path`, or `:task_name` is now `task_name`.
@@ -14,7 +23,6 @@ Versions are identified by the pattern `YYYYMMSS` (A date with sequence number; 
   - Files/paths must be specified in the `task.inputs` list or mapping.
   - See the [documentation](breaking/20250301.md) about this breaking change and tools to automatically fix.
   - Old Makex files MUST be fixed ASAP.
-- **BREAKING CHANGE**: Task names can no longer contain `-` characters. This change may be reversed.
 - The `copy` function now overwrites files and folders.
 - Fix an issue with copy on write not being detected.
 - Improve recursive folder copying performance significantly.

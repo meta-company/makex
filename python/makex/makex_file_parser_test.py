@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from makex.constants import SYNTAX_2025
 from makex.context import Context
-from makex.makex_file import MakexFileCycleError
+from makex.errors import MakexFileCycleError
 from makex.makex_file_parser import (
     TargetGraph,
     parse_makefile_into_graph,
@@ -232,6 +232,37 @@ def test():
 
     result = parse_makefile_into_graph(_makex_context, makefile_path_a, graph)
     ref_a = TaskReference("test", makefile_path_a)
+
+    a = graph.get_target(ref_a)
+    assert a
+
+
+def test_self_references(tmp_path: Path, _makex_context):
+    workspace_a = tmp_path
+    workspace_file_a = workspace_a / "WORKSPACE"
+    workspace_file_a.touch()
+
+    makefile_path_a = workspace_a / "Makexfile"
+    makefile_path_a.write_text(
+        """
+task(
+  name="a",
+  inputs={
+    "input1": "path1",
+    "input2": "path2",
+  },
+  steps=[
+    copy(self.inputs.input1), 
+    copy(self.inputs["input2"])
+  ]
+)
+        """
+    )
+
+    graph = TargetGraph()
+
+    result = parse_makefile_into_graph(_makex_context, makefile_path_a, graph)
+    ref_a = TaskReference("a", makefile_path_a)
 
     a = graph.get_target(ref_a)
     assert a

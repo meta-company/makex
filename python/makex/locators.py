@@ -1,7 +1,4 @@
-from typing import (
-    Optional,
-    Union,
-)
+from typing import Optional
 
 from makex.constants import (
     SYNTAX_2024,

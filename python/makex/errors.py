@@ -167,3 +167,14 @@ class ConfigurationError(MakexError):
     def __init__(self, message, location: FileLocationProtocol):
         super().__init__(message)
         self.location = location
+
+
+class MakexFileCycleError(MakexError):
+    detection: "TaskObject"
+    cycles: list["TaskObject"]
+
+    def __init__(self, message, detection: "TaskObject", cycles: list["TaskObject"]):
+        super().__init__(message)
+        self.message = message
+        self.detection = detection
+        self.cycles = cycles

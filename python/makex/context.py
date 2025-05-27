@@ -183,7 +183,7 @@ class Context:
 
     makex_syntax_version: int = MAKEX_SYNTAX_VERSION
 
-    files_in_requirements_enabled: bool = True
+    files_in_requirements_enabled: bool = False
 
     include_enabled: bool = False
 

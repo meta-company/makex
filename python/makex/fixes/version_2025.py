@@ -266,6 +266,8 @@ class ConvertMakexVersion1(VisitorBasedCodemodCommand):
             return self.fix_task(original_node, updated_node)
         elif function_name == "execute":
             return self.fix_execute(original_node, updated_node)
+        elif function_name == "copy":
+            return self.fix_execute(original_node, updated_node)
         elif function_name == "makex":
             new_args = []
             for arg in updated_node.args:

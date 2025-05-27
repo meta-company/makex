@@ -208,6 +208,63 @@ class TransformSelfReferences(ast.NodeTransformer):
 
         return node
 
+    def visit_Subscript(self, node):
+        node_value = node.value
+        line = node.lineno
+        offset = node.col_offset
+
+        if isinstance(node_value, ast_Attribute) and node_value.value.id == "self":
+            # print(ast.dump(ast.parse('self.outputs["test"]'), indent=2))
+            # Expr(
+            #   value=Subscript(
+            #     value=Attribute(
+            #       value=Name(id='self', ctx=Load()),
+            #       attr='outputs',
+            #       ctx=Load()
+            #     ),
+            #     slice=Constant(value='test'),
+            #     ctx=Load()
+            #   )
+            # )
+
+            namespace = node_value.attr
+
+            if namespace not in {"outputs", "inputs"}:
+                location = FileLocation(node.lineno, node.col_offset, self.path)
+                raise PythonScriptError("Invalid self reference {}", location=location)
+
+            _slice = node.slice
+
+            if not isinstance(_slice, ast_Constant):
+                location = FileLocation(node.lineno, node.col_offset, self.path)
+                raise PythonScriptError("Invalid self reference {}", location=location)
+
+            if not isinstance(_slice.value, str):
+                location = FileLocation(node.lineno, node.col_offset, self.path)
+                raise PythonScriptError("Invalid self reference {}", location=location)
+
+            namespace_name = _slice.value
+
+            attr_mapping = self._attr_map[namespace]
+
+            reference_call = ast_Call(
+                func=ast_Name(
+                    id=attr_mapping,
+                    ctx=ast_Load(),
+                    lineno=line,
+                    col_offset=offset,
+                ),
+                args=[ast_Constant(namespace_name)],
+                # XXX: location argument is added by a later pass
+                keywords=[],
+                lineno=line,
+                col_offset=offset,
+            )
+            return reference_call
+
+        self.generic_visit(node)
+        return node
+
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         if self._transform_self_references is False:
             self.generic_visit(node)
@@ -224,11 +281,11 @@ class TransformSelfReferences(ast.NodeTransformer):
             attr = node.attr
             line = node.lineno
             offset = node.col_offset
-            location = create_file_location_call(self.path, line, offset)
 
             attr_mapping = self._attr_map.get(attr, None)
 
             if attr_mapping is None:
+                location = FileLocation(line, offset, self.path)
                 raise PythonScriptError(f"Invalid self task attribute {attr}", location=location)
 
             reference_call = ast_Call(
@@ -240,14 +297,7 @@ class TransformSelfReferences(ast.NodeTransformer):
                 ),
                 args=[],
                 # XXX :location is added by later pass
-                keywords=[
-                    #    ast_keyword(
-                    #        arg=FILE_LOCATION_ARGUMENT_NAME,
-                    #        value=location,
-                    #        lineno=line,
-                    #        col_offset=offset,
-                    #    ),
-                ],
+                keywords=[],
                 lineno=line,
                 col_offset=offset,
             )
@@ -273,12 +323,17 @@ class TransformSelfReferences(ast.NodeTransformer):
 
             line = node.lineno
             offset = node.col_offset
-            location = create_file_location_call(self.path, line, offset)
 
             namespace = node_value.attr
             namespace_name = node.attr
 
             attr_mapping = self._attr_map.get(namespace, None)
+
+            if attr_mapping is None:
+                location = FileLocation(line, offset, self.path)
+                raise PythonScriptError(
+                    f"Invalid self task attribute {namespace}", location=location
+                )
 
             reference_call = ast_Call(
                 func=ast_Name(
@@ -289,14 +344,7 @@ class TransformSelfReferences(ast.NodeTransformer):
                 ),
                 args=[ast_Constant(namespace_name)],
                 # XXX: location argument is added by a later pass
-                keywords=[
-                    #    ast_keyword(
-                    #        arg=FILE_LOCATION_ARGUMENT_NAME,
-                    #        value=location,
-                    #        lineno=line,
-                    #        col_offset=offset,
-                    #    ),
-                ],
+                keywords=[],
                 lineno=line,
                 col_offset=offset,
             )

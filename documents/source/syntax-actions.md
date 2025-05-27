@@ -35,7 +35,7 @@ task(
   
   Any arguments which evaluate to None will not be included when running the executable.
   
-  To execute the output of another Task, you must specify the task name and path of the Task (for example, :code:`execute("//path:task_name", ...)` ). 
+  To execute the output of another Task, you must specify the task name, followed by a colon, followed by an optional path of the Task (for example, :code:`execute("task_name://path", ...)` or :code:`execute("task_name:", ...)`). 
   See :ref:`Tasks as executables<tasks-as-executables>` for more information. 
   
   .. note:: 
@@ -56,6 +56,14 @@ task(
     When the executable is a reference to the output of another task, currently, the first declared unnamed output of the referred Task is used as the executable.
     The referenced Task should be included in executing task's requirements, though it may be automatically added (implicitly, by configuration).
     For more on this, see Executing the Output of a Task from another Task.
+    
+  .. tip::
+    
+    You may group arguments/values together using tuples.
+    For example:
+     
+    :code:`execute("example", ("--argument1", "argument1_value"), ...)`.
+    
 ```
 
 
@@ -65,7 +73,7 @@ task(
 .. py:function:: copy(paths, destination=None, /)
   
   Copy `paths` (files or folders) to the Task's output folder, or the specified folder `destination`.
-  `paths` may be a list of paths or a single path.
+  The `paths` argument may be a list of paths, or a single path.
   
   If `destination` is a relative path, it will be resolved relative to the Task's output path; this may be used to prefix items in the output.
   Any directories specified in `destination` (by using a directory separator) will be created before copying.

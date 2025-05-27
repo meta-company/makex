@@ -1,4 +1,4 @@
-from numpy.ma.core import minimum---
+---
 status: "Draft"
 ---
 # Resource Allocation/Thresholding Control
@@ -12,6 +12,7 @@ A static threads/workers/jobs argument (e.g. `--jobs` in make/ninja/mason/bazel/
 For example, if a run has a high amount of tasks to run, the tasks may slow the machine down (CPU contention).
 
 Conversely, if one or more task executions use a high amount of memory, newly queued/executed tasks may not run properly with memory being exhausted (Memory Contention).
+
 If a task uses a high amount of disk IO, other tasks may proceed more slowly because of it (IO/Disk/Storage Contention). 
 
 Developers using makex would prefer that it didn't use all of their machine's resources.

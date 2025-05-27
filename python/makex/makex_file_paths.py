@@ -54,7 +54,10 @@ from makex.python_script import (
     StringValue,
     get_location,
 )
-from makex.target import Task
+from makex.target import (
+    Task,
+    format_hash_key,
+)
 
 MISSING = object()
 
@@ -110,7 +113,7 @@ def join_string(ctx: Context, task: Task, base: Path, string: JoinedString):
         )
 
 
-def _join_string_iterable(ctx, task: Task, base: Path, string: JoinedString):
+def _join_string_iterable(ctx, task: Task, base: Path, string: JoinedString) -> Iterable[str]:
     for part in string.parts:
         if isinstance(part, StringValue):
             yield part.value
@@ -131,7 +134,7 @@ def _join_string_iterable(ctx, task: Task, base: Path, string: JoinedString):
         elif isinstance(part, TaskSelfName):
             yield task.name
         elif isinstance(part, TaskOutputsReference):
-            for output in _resolve_task_outputs_reference(ctx, task, path):
+            for output in _resolve_task_outputs_reference(ctx, task, part):
                 yield output.as_posix()
         else:
             raise PythonScriptError(
@@ -426,7 +429,7 @@ def _resolve_task_self_path(ctx, task: Task, value: TaskSelfPath) -> PathWithLoc
     task_path = task.path
     assert task_path is not None
     try:
-        _value = Path(task_path, *value.parts)
+        _value = Path(task_path, *(resolve_to_string(ctx, task, part) for part in value.parts))
     except TypeError as e:
         logging.exception(e)
         raise PythonScriptError(
@@ -693,20 +696,31 @@ def _resolve_task_outputs_reference(ctx: Context, task: Task,
     task_name = value.task.name
     task_path = str(value.task.path)
 
-    task = ctx.graph_2.get_task2(task_name, task_path)
+    _task = ctx.graph_2.get_task2(task_name, task_path)
 
-    if task is None:
+    if _task is None:
+        requires = set(requirement.key() for requirement in task.requires)
+        key = format_hash_key(value.task.name, value.task.path)
+
+        if key not in requires:
+
+            raise PythonScriptError(
+                f"Task `{task_name}` referred to, but missing in requires list.",
+                value.location,
+            )
+
         raise PythonScriptError(
-            f"Missing task referred to in task_outputs function: {value.task}", value.location
+            f"Missing task `{task_name}` referred to in task_outputs function: {value.task}",
+            value.location
         )
 
     if output_name is None:
         # return all of them
-        for output in task.outputs:
+        for output in _task.outputs:
             yield output.path
 
     # return a specific output
-    output = task.output_dict.get(output_name, None)
+    output = _task.output_dict.get(output_name, None)
     if output is None:
         raise PythonScriptError(
             f"Task {value.task} does not have any outputs named {output_name}", value.location

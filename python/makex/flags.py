@@ -136,6 +136,9 @@ READ_CONFIG_FROM_PARENTS = _get_bool("READ_CONFIG_FROM_PARENTS", False)
 # TODO: SYNTAX_2025: switch this to 2 once we confirm reversing of locators and requires list migration flags.
 MAKEX_SYNTAX_VERSION = _get_string("SYNTAX", SYNTAX_2025)
 
+FOLDERS_IN_INPUTS = _get_string("FOLDERS_IN_INPUTS", True)
+FOLDERS_IN_OUTPUTS = _get_string("FOLDERS_IN_OUTPUTS", True)
+
 # internal or shutil
 COPY_LIBRARY = _get_string("COPY_LIBRARY", "internal")
 

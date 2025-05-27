@@ -32,13 +32,17 @@ from makex.context import Context
 from makex.errors import (
     ExecutionError,
     ExternalExecutionError,
+    MakexFileCycleError,
     MultipleErrors,
 )
 from makex.file_checksum import FileChecksum
-from makex.flags import SCHEDULE_DEBUG_ENABLED
+from makex.flags import (
+    FOLDERS_IN_INPUTS,
+    FOLDERS_IN_OUTPUTS,
+    SCHEDULE_DEBUG_ENABLED,
+)
 from makex.locators import format_locator
 from makex.makex_file import (
-    MakexFileCycleError,
     TaskObject,
     find_makex_files,
     resolve_task_output_path,
@@ -73,6 +77,7 @@ from makex.python_script import (
     JoinedString,
     PythonScriptError,
     StringValue,
+    get_location,
 )
 from makex.target import (
     Action,
@@ -148,7 +153,7 @@ def _transform_output_to_path(
     #elif isinstance(value, PathElement):
     # TODO: we should use the resolved path here
     #    path = resolve_path_element_workspace(ctx, target.workspace, value, base)
-    if isinstance(value, (StringValue, TaskPath, TaskSelfPath, PathElement)):
+    if isinstance(value, (StringValue, TaskPath, TaskSelfPath, PathElement, JoinedString)):
         return resolve_pathlike(ctx, target, base, value)
 
     raise NotImplementedError(f"Invalid output type {type(value)}: {value!r}")
@@ -267,7 +272,10 @@ class Executor:
             return False
 
         if SCHEDULE_DEBUG_ENABLED:
-            trace("Check task requires ready: %s", requires)
+            trace("Check task's requirements ready: %s", requires)
+
+        if not requires:
+            return True
 
         # TODO: use a set here to check for completions
         statuses = []
@@ -422,6 +430,7 @@ class Executor:
                     evaluated, errors = self._execute_target(target)
 
                     if errors:
+                        logging.error("Execution had errors: %s", errors)
                         self.errors.extend(errors)
                         self.stop.set()
                 else:
@@ -431,6 +440,7 @@ class Executor:
                     if self._are_dependencies_executed(resolved_target):
                         evaluated, errors = self._execute_target(target)
                         if errors:
+                            logging.error("Execution had errors: %s", errors)
                             self.errors.extend(errors)
                             self.stop.set()
                     else:
@@ -445,6 +455,7 @@ class Executor:
                 #if i == 5:
                 #    print("early break")
                 #    break
+            logging.debug("Stop has been set.")
         finally:
             debug("Shutdown and wait for tasks to finish...")
             self.pool.shutdown()
@@ -469,7 +480,8 @@ class Executor:
 
         return self.finished, self.errors
 
-    def _checksum_file(self, path: Path) -> FileChecksum:
+    def _checksum_file(self, path: Path, location=None) -> FileChecksum:
+        # TODO: improve error checking here.
         if self._supports_extended_attribute is False:
             # we need to store the checksum in a database sidecar
             # store the checksum in the database
@@ -493,7 +505,17 @@ class Executor:
                 )
         else:
             # filechecksum class handles the caching part
-            checksum = FileChecksum.create(path)
+            try:
+                checksum = FileChecksum.create(path)
+            except OSError as e:
+                logging.exception(e)
+                if location:
+                    raise PythonScriptError(
+                        f"Error creating checksum of file {path}", location=location
+                    )
+                else:
+                    raise e
+
         return checksum
 
     def _is_checksum_stale(self, path, checksum: FileChecksum = None):
@@ -590,10 +612,10 @@ class Executor:
 
             linkpath.symlink_to(new_path, target_is_directory=True)
 
-    def _get_output_file_status(self, path: Path) -> FileStatus:
+    def _get_output_file_status(self, path: Path, location=None) -> FileStatus:
         checksum = None
         if path.exists():
-            checksum = self._checksum_file(path)
+            checksum = self._checksum_file(path, location=location)
         status = FileStatus(path, checksum=checksum)
         return status
 
@@ -648,7 +670,7 @@ class Executor:
                         continue
 
                     # checksum the input file if it hasn't been
-                    checksum = self._checksum_file(path)
+                    checksum = self._checksum_file(path, location=node.location)
                     seen.add(path)
                     inputs.append(FileStatus(
                         path=path,
@@ -664,7 +686,7 @@ class Executor:
 
                 try:
                     for path in resolve_glob(ctx, target, target_input_path, node):
-                        checksum = self._checksum_file(path)
+                        checksum = self._checksum_file(path, location=node.location)
                         seen.add(path)
                         inputs.append(FileStatus(
                             path=path,
@@ -695,7 +717,7 @@ class Executor:
                 try:
                     for i, file in enumerate(resolve_find_files(ctx, target, path, node.pattern)):
                         #trace("Checksumming input file %s", file)
-                        checksum = self._checksum_file(file)
+                        checksum = self._checksum_file(file, location=node.location)
                         seen.add(file)
                         inputs.append(FileStatus(
                             path=file,
@@ -821,20 +843,18 @@ class Executor:
 
         inputs_mapping = {}
 
-        if False:
-            # search for any input files from the last run missing in this one
-            for file in self._get_last_input_files(target):
-                if file not in seen:
-                    #errors.append()
-                    inputs.append(
-                        FileStatus(
-                            path=path,
-                            error=ExecutionError("Missing input file: {node}", target),
-                        )
-                    )
-                    #errors.append()
-
-        environment = {}
+        #if False:
+        #    # search for any input files from the last run missing in this one
+        #    for file in self._get_last_input_files(target):
+        #        if file not in seen:
+        #            #errors.append()
+        #            inputs.append(
+        #                FileStatus(
+        #                    path=path,
+        #                    error=ExecutionError("Missing input file: {node}", target),
+        #                )
+        #            )
+        #            #errors.append()
 
         if isinstance(target.environment, dict) is False:
             raise PythonScriptError(
@@ -881,7 +901,16 @@ class Executor:
                     task_path=target_input_path,
                     value=path_like,
                 ):
-                    checksum = self._checksum_file(file)
+                    if file.is_dir():
+                        if FOLDERS_IN_INPUTS:
+                            continue
+
+                        raise PythonScriptError(
+                            f"Invalid input item in `inputs` argument; expected file, got folder (`{file}`)",
+                            get_location(path_like)
+                        )
+                    # TODO: more specific location
+                    checksum = self._checksum_file(file, location=target.location)
                     seen.add(file)
                     inputs.append(FileStatus(
                         path=file,
@@ -901,41 +930,22 @@ class Executor:
                     task_path=target_output_path,
                     value=path_like,
                 ):
+
+                    if status.path.is_dir():
+                        if FOLDERS_IN_OUTPUTS:
+                            continue
+
+                        raise PythonScriptError(
+                            f"Invalid output item in `outputs` argument; expected file, got folder (`{status.path}`)",
+                            get_location(path_like)
+                        )
+
                     if output_name is None:
                         unnamed_outputs.append(status)
                     else:
                         output_dict.setdefault(output_name, []).append(status)
 
                     outputs.append(status)
-
-                if False:
-                    # TODO: check if this is a longer, but faster path.
-                    if isinstance(path_like, ListTypes):
-                        for value in path_like:
-                            path = _transform_output_to_path(ctx, target, target_output_path, value)
-                            trace("Check task output: %s", path)
-                            status = self._get_output_file_status(path)
-                            if output_name is None:
-                                unnamed_outputs.append(status)
-                            else:
-                                output_dict.setdefault(output_name, []).append(status)
-
-                            outputs.append(status)
-                    elif isinstance(path_like, StringValue):
-                        path = _transform_output_to_path(ctx, target, target_output_path, path_like)
-                        trace("Check task output: %s", path)
-                        status = self._get_output_file_status(path)
-                        if output_name is None:
-                            unnamed_outputs.append(status)
-                        else:
-                            output_dict[output_name] = status
-
-                        outputs.append(status)
-                    else:
-                        raise PythonScriptError(
-                            message=f"Unknown type in task outputs {type(path_like)}: {path_like!r}",
-                            location=figure_out_location(path_like, target.location),
-                        )
 
         # XXX: Use the evaluated task to resolve/fill any environment variables defined.
         #  We must use the evaluated target because it has a valid path property which the path resolver functions expect.
@@ -962,37 +972,6 @@ class Executor:
 
         for command in target.commands:
             actions.extend(self._produce_internal_actions(ctx, task=evaluated, action=command))
-
-            if False:
-                # TODO: check if this is a longer, but faster path.
-                # TODO: check we actually got a Action
-                if isinstance(command, ListTypes):
-                    for c in command:
-                        if isinstance(c, InternalAction) is False:
-                            location = figure_out_location(c, target.location)
-
-                            err = PythonScriptError(
-                                f"Invalid action in task {target}: {c!r}",
-                                location,
-                            )
-                            raise err
-                        else:
-                            arguments = c.transform_arguments(ctx, evaluated)
-                            actions.append(Action(c, arguments))
-                elif command is None:
-                    # XXX: skip None values in steps/actions lists.
-                    continue
-                elif isinstance(command, InternalAction) is False:
-                    location = figure_out_location(command, target.location)
-
-                    err = PythonScriptError(
-                        f"Invalid action in task {target}: {command!r}",
-                        location,
-                    )
-                    raise err
-                else:
-                    arguments = command.transform_arguments(ctx, evaluated)
-                    actions.append(Action(command, arguments))
 
         return evaluated, errors
 
@@ -1022,7 +1001,9 @@ class Executor:
         elif isinstance(value, (StringValue, PathElement, TaskPath, TaskSelfPath, JoinedString)):
             path = _transform_output_to_path(ctx, task, task_path, value)
             trace("Check task output: %s", path)
-            yield self._get_output_file_status(path)
+            yield self._get_output_file_status(
+                path, location=figure_out_location(value, task.location)
+            )
         else:
             raise PythonScriptError(
                 message=f"Unknown type in task outputs {type(value)}: {value!r}",
@@ -1146,6 +1127,7 @@ class Executor:
             return True, []
 
         # First, Check the in-memory cache
+        # TODO: we're not using this predicate?
         target_dirty = self._memory_has_target(h) is False
 
         errors = []
@@ -1446,7 +1428,8 @@ class Executor:
             path = output.path
             if path.exists():
                 # TODO: do a checksum of the output and compare
-                checksum = self._checksum_file(path)
+                # TODO: improve location
+                checksum = self._checksum_file(path, location=target.location)
 
                 if self._is_checksum_stale(path, checksum):
                     trace("Checksum of %s is stale: %s", path, checksum)
@@ -1505,6 +1488,7 @@ class Executor:
     def _target_completed(self, target: Task, result: Future[TargetResult]):
         # Called after the Future is completed.
         # Called in *this* thread (not the thread in which the target was executed).
+        # TODO: just use a simple key and lookup the task object in this thread instead of passing it around.
         assert isinstance(target, Task)
 
         self._mark_target_executed(target)

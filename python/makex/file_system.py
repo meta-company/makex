@@ -10,8 +10,6 @@ from os import makedirs as os_makedirs
 from os import readlink as os_readlink
 from os import scandir as os_scandir
 from os import symlink as os_symlink
-from os import unlink as os_unlink
-from os.path import exists as path_exists
 from os.path import join as path_join
 from pathlib import Path
 from shutil import copy2
@@ -24,7 +22,6 @@ from typing import (
     Union,
 )
 
-from makex._logging import trace
 from makex.constants import BUILT_IN_REFLINKS
 
 REFLINKS_ENABLED = False
@@ -37,6 +34,7 @@ else:
         from file_cloning import clone_file
         REFLINKS_ENABLED = True
     except ImportError:
+        clone_file = None
         REFLINKS_ENABLED = False
 
 # PERFORMANCE: Optimize these lookups out
@@ -73,15 +71,16 @@ def find_files(
     :param pattern: A pattern of file names to include. Should match a full path.
     :param ignore_pattern: A pattern of file names to ignore. Should match a full path.
     :param ignore_names: Set of names to quickly check for ignores; faster than using the pattern.
-    :param symlinks: Yield symlink files.
+    :param symlinks: Yield matching  symlink files.
+    :param folders: Yield matching folders.
     :return:
     """
     #trace("Find files in %s: pattern=%s ignore=%s", path.path if isinstance(path, DirEntry) else path, pattern, ignore_names)
     ignore_names = ignore_names or set()
 
     # XXX: Performance optimization for many calls.
-    _ignore_match = ignore_pattern.match if ignore_pattern else (lambda: False)
-    _pattern_match = pattern.match if pattern else None
+    _ignore_match = ignore_pattern.match if ignore_pattern else (lambda v: False)
+    _pattern_match = pattern.match if pattern else lambda v: True
 
     # TODO: scandir may return bytes: https://docs.python.org/3/library/os.html#os.scandir
     for entry in os_scandir(path):
@@ -91,33 +90,30 @@ def find_files(
         if name in ignore_names:
             continue
 
-        if ignore_pattern and _ignore_match(_path):
+        if _ignore_match(_path):
             continue
 
-        if _is_dir(entry, follow_symlinks=False): #XXX: must be first because symlinks can be dirs
-            if folders:
-                if pattern is None:
-                    yield Path(_path)
-                elif _pattern_match(_path):
-                    yield Path(_path)
+        if _is_dir(entry, follow_symlinks=False):
+            #XXX: must be the first branch because symlinks can be dirs
+            if folders and _pattern_match(_path):
+                yield Path(_path)
 
             yield from find_files(
                 path=entry,
                 pattern=pattern,
                 ignore_pattern=ignore_pattern,
                 ignore_names=ignore_names,
+                symlinks=symlinks,
+                folders=folders,
             )
 
-        elif _is_file(entry, follow_symlinks=False):
-            if pattern is None:
-                yield Path(_path)
-            elif _pattern_match(_path):
-                yield Path(_path)
+        if not _pattern_match(_path):
+            continue
+
+        if _is_file(entry, follow_symlinks=False):
+            yield Path(_path)
         elif symlinks and _is_symlink(entry):
-            if pattern is None:
-                yield Path(_path)
-            elif _pattern_match(_path):
-                yield Path(_path)
+            yield Path(_path)
 
 
 def safe_reflink(src, dest):
@@ -195,13 +191,6 @@ def copy_tree(
     Copies a folder tree using scandir.
     
     shutil is broken: the ignore function protocol has us creating huge sets in memory slowing down significantly.
-    
-    :param src: 
-    :param dst: 
-    :param symlinks: 
-    :param ignore: 
-    :param copy: 
-    :return: 
     """
     _source = os.fspath(source)
     os_makedirs(destination, exist_ok=True)
@@ -230,10 +219,10 @@ def copy_tree(
                 if symlinks == "copy-link":
                     linkto = os_readlink(source_path)
                     os_symlink(linkto, destination_path)
-                    #trace("Copy symlink as is %s -> %s", linkto, destination_path)
+                    #trace("Copy symlink as is %s → %s", linkto, destination_path)
                 elif symlinks == "copy-data":
                     linkto = os_readlink(source_path)
                     copy(linkto, destination_path)
-                    #trace("Copy symlink data %s -> %s", linkto, destination_path)
+                    #trace("Copy symlink data %s → %s", linkto, destination_path)
                 elif symlinks == "ignore":
                     continue
