@@ -17,7 +17,7 @@ VENV = task_path("venv")
 VENV_BIN = VENV / "bin"
 
 # NOTE: This must be updated on new release versions (YYYYMMSS[equence]).
-VERSION = "20250501"
+VERSION = "20250502"
 
 CHANGE = Environment.get("CHANGE", "")
 
@@ -33,7 +33,7 @@ task(
 task(
     name="documents-html",
     requires=[
-        "venv",
+        "venv", #optional("install://tools/documentation/sphinx-theme"),
     ],
     inputs=[
         find("documents/source"),
@@ -46,16 +46,14 @@ task(
     ],
     # Set the environment for future actions.
     environment={
-        "BUILDDIR": task_path("documents-html"),
+        #"BUILDDIR": task_path("documents-html"),
         "LC_ALL": "C",
         "RELEASE": VERSION,
     },
     steps=[
-        shell(
-            # f"source {VENV}/bin/activate",
-            f"make -e -C documents clean html",
-        ),
-        print(f"Documents available at file://{self.path}/html/index.html")
+        # NOTE: using system provided sphinx-build so we can use private templates
+        execute("sphinx-build-3", "-M", "html", "documents/source", self.path),
+        print(f"Documents available at file://{self.path}/html/index.html"),
         # all three of these are the same:
         #shell(f"xdg-open $PWD/_output_/documents-html/html/index.html")
         #shell(f"xdg-open {path('documents-html')}/html/index.html")
@@ -253,73 +251,6 @@ task(
     ],
 )
 
-
-# test creating a task using a macro
-# todo: test creating action or list of actions with a macro
-@macro
-def nuitka_target_command_line(
-    name,
-    PYTHON_PACKAGE,
-    APPLICATION_NAME,
-    pythonpath,
-    main,
-    requires=None,
-    VENV_BIN=None,
-    extra=None,
-):
-    """ Compile a command line application for nuitka. """
-    BUILD_NUITKA = task_path(name)
-
-    NUITKA_ARGS = []
-    NUITKA_ARGS += [f"--include-package={PYTHON_PACKAGE}"]
-    NUITKA_ARGS += [f"--report={BUILD_NUITKA}/nuitka-build-report.xml"]
-    NUITKA_ARGS += ["--follow-imports", "--disable-console"]
-    NUITKA_ARGS += [f"--output-dir={BUILD_NUITKA}"]
-    NUITKA_ARGS += [f"--output-filename={APPLICATION_NAME}"]
-    #NUITKA_ARGS += [f"--include-package-data={PYTHON_PACKAGE}.data.completions"]
-    NUITKA_ARGS += ["--python-flag=-O,nosite,no_docstrings"]
-    NUITKA_ARGS += ["--show-anti-bloat-changes"]
-    NUITKA_ARGS += ["--nofollow-import-to=*.tests"]
-    NUITKA_ARGS += ["--nofollow-import-to=*_test.py"]
-    #NUITKA_ARGS += ["--nofollow-import-to=shtab"]
-    NUITKA_ARGS += ["--nofollow-import-to=pytest"]
-    NUITKA_ARGS += ["--standalone", "--onefile"]
-    NUITKA_ARGS += ["--clang"]
-    NUITKA_ARGS += ["--static-libpython=yes"]
-
-    NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
-    NUITKA_ARGS += ["--prefer-source-code"]
-    NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
-    NUITKA_ARGS += extra
-
-    task(
-        name=name,
-        requires=requires,
-        environment={
-            "PYTHONPATH": pythonpath,
-            "CCFLAGS": "-march=native -mtune=native -Os",
-        },
-        steps=[
-            execute(VENV_BIN / "nuitka3", NUITKA_ARGS, main),
-        ],
-    )
-
-
-nuitka_target_command_line(
-    name="nuitka2",
-    PYTHON_PACKAGE="makex",
-    APPLICATION_NAME="makex",
-    pythonpath=source("python"),
-    main=source("python/makex/__main__.py"),
-    requires=["venv"],
-    VENV_BIN=VENV_BIN,
-    extra=[
-        f"--include-package-data=makex.data.completions",
-        "--nofollow-import-to=shtab",
-    ]
-)
-# TODO: call(":nuitka_target_command_line", ...)
-
 BUILD_NUITKA = task_path("nuitka")
 PYTHON_PACKAGE = "makex"
 APPLICATION_NAME = "makex"
@@ -420,3 +351,70 @@ task(
     name="pyoxidizer",
     steps=[execute("pyoxidizer", "build", "--var", "build_path", task_path("pyoxidizer"))]
 )
+
+
+# test creating a task using a macro
+# todo: test creating action or list of actions with a macro
+@macro
+def nuitka_target_command_line(
+    name,
+    PYTHON_PACKAGE,
+    APPLICATION_NAME,
+    pythonpath,
+    main,
+    requires=None,
+    VENV_BIN=None,
+    extra=None,
+):
+    """ Compile a command line application for nuitka. """
+    BUILD_NUITKA = task_path(name)
+
+    NUITKA_ARGS = []
+    NUITKA_ARGS += [f"--include-package={PYTHON_PACKAGE}"]
+    NUITKA_ARGS += [f"--report={BUILD_NUITKA}/nuitka-build-report.xml"]
+    NUITKA_ARGS += ["--follow-imports", "--disable-console"]
+    NUITKA_ARGS += [f"--output-dir={BUILD_NUITKA}"]
+    NUITKA_ARGS += [f"--output-filename={APPLICATION_NAME}"]
+    #NUITKA_ARGS += [f"--include-package-data={PYTHON_PACKAGE}.data.completions"]
+    NUITKA_ARGS += ["--python-flag=-O,nosite,no_docstrings"]
+    NUITKA_ARGS += ["--show-anti-bloat-changes"]
+    NUITKA_ARGS += ["--nofollow-import-to=*.tests"]
+    NUITKA_ARGS += ["--nofollow-import-to=*_test.py"]
+    #NUITKA_ARGS += ["--nofollow-import-to=shtab"]
+    NUITKA_ARGS += ["--nofollow-import-to=pytest"]
+    NUITKA_ARGS += ["--standalone", "--onefile"]
+    NUITKA_ARGS += ["--clang"]
+    NUITKA_ARGS += ["--static-libpython=yes"]
+
+    NUITKA_ARGS += ["--experimental=no-outside-dependencies"]
+    NUITKA_ARGS += ["--prefer-source-code"]
+    NUITKA_ARGS += ["--warn-unusual-code", "--warn-implicit-exceptions"]
+    NUITKA_ARGS += extra
+
+    task(
+        name=name,
+        requires=requires,
+        environment={
+            "PYTHONPATH": pythonpath,
+            "CCFLAGS": "-march=native -mtune=native -Os",
+        },
+        steps=[
+            execute(VENV_BIN / "nuitka3", NUITKA_ARGS, main),
+        ],
+    )
+
+
+nuitka_target_command_line(
+    name="nuitka2",
+    PYTHON_PACKAGE="makex",
+    APPLICATION_NAME="makex",
+    pythonpath=source("python"),
+    main=source("python/makex/__main__.py"),
+    requires=["venv"],
+    VENV_BIN=VENV_BIN,
+    extra=[
+        f"--include-package-data=makex.data.completions",
+        "--nofollow-import-to=shtab",
+    ]
+)
+# TODO: call(":nuitka_target_command_line", ...)

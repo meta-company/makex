@@ -13,11 +13,12 @@ _shtab_makex_commands() {
     "evolve:Fixes and evolves makex files to be compatible with new syntax. This should only be used as instructed."
     "fix:Fixes and evolves makex files to be compatible with new syntax. This should only be used as instructed."
     "inputs:"
+    "list:Generate list of targets parsed from the makex file found in path."
     "outputs:"
     "path:Get the output path of a task."
     "run:Run a task or list of tasks."
-    "targets:"
-    "tasks:"
+    "targets:Generate list of targets parsed from the makex file found in path."
+    "tasks:Generate list of targets parsed from the makex file found in path."
     "version:"
     "workspace:Print the current workspace, or the workspace detected at path."
   )
@@ -91,6 +92,13 @@ _shtab_makex_inputs_options=(
   "(*):targets:"
 )
 
+_shtab_makex_list_options=(
+  "(- : *)"{-h,--help}"[show this help message and exit]"
+  "--paths[How to output paths of tasks. \`relative\` is relative to the current folder.]:paths:(absolute workspace relative)"
+  "--prefix[May be used to prefix all paths.]"
+  ":Path to a makex file or directory. The current directory is the default.:"
+)
+
 _shtab_makex_outputs_options=(
   "(- : *)"{-h,--help}"[show this help message and exit]"
   "*--ignore[Specify file ignore patterns.]:ignore:"
@@ -159,6 +167,7 @@ _shtab_makex() {
         evolve) _arguments -C -s $_shtab_makex_evolve_options ;;
         fix) _arguments -C -s $_shtab_makex_fix_options ;;
         inputs) _arguments -C -s $_shtab_makex_inputs_options ;;
+        list) _arguments -C -s $_shtab_makex_list_options ;;
         outputs) _arguments -C -s $_shtab_makex_outputs_options ;;
         path) _arguments -C -s $_shtab_makex_path_options ;;
         run) _arguments -C -s $_shtab_makex_run_options ;;

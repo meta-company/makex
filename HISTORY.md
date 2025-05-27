@@ -4,6 +4,11 @@ This document lists major releases and changes for the Makex project.
 
 Versions are identified by the pattern `YYYYMMSS` (A date with sequence number; year (`YYYY`), month (`MM`), sequence (`SS`)).
 
+## 20250502
+
+- Resolve a critical issue preventing stoppage on error.
+- Add alias for `tasks` list command (`list`).
+
 ## 20250501
 
 - Allow joined strings in output file paths.

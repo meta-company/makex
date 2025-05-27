@@ -1475,6 +1475,8 @@ class MakexFile(MakexFileProtocol):
     #code: Optional[types.CodeType] = None
     includes: list[MakexFileProtocol]
 
+    code: types.CodeType
+
     def __init__(
         self,
         ctx,

@@ -4,7 +4,7 @@
 
 Makex is a modern build and automation tool.
 
-It __*makex*__ stuff happen. 🙂
+It __*makex*__ stuff happen 🙂
 
 <!-- heading:end -->
 

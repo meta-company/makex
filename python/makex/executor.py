@@ -1227,13 +1227,10 @@ class Executor:
             error("Can't find %s in %s %r", target.key(), self.queued, target)
             raise e from e
 
-        self._target_status[target.key()] = True
-
     def _execute_target(
         self,
         target: TaskObject,
     ) -> tuple[Optional[Task], Optional[list[Exception]]]:
-
         # Don't execute any more if we have a stop flag.
         if self.stop.is_set():
             return None, None
@@ -1509,8 +1506,11 @@ class Executor:
                 pass
             #error("ERROR RUNNING TARGET: %s", result.exception())
             self.errors.append(exc)
+            debug("Forcing stop of execution.")
             self.stop.set()
             return None
+
+        self._mark_target_complete(target)
 
         #self._successful_tasks.add(target.key())
 

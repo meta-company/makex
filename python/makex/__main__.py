@@ -388,9 +388,10 @@ def parser(cache: Path = None, documentation: bool = True):
     ######### targets subcommand
     subparser = subparsers.add_parser(
         "tasks",
-        aliases=["targets"], # TODO: remove this.
+        aliases=["list", "targets"], # TODO: remove this.
         parents=[base_parser],
         help="Generate list of targets parsed from the makex file found in path.",
+        description="Generate list of targets parsed from the makex file found in path.",
     )
     subparser.set_defaults(command_function=main_targets)
     subparser.add_argument(

@@ -948,28 +948,6 @@ def parse_makefile_into_graph(
         # TODO: keep the makex file data in memory since it's probably small.
         # TODO: check the makex_file_cache for an MakexFile. if not in cache, add it by parsing.
         # TODO: the ast will be annotated with FileLocation
-        """
-        TODO: use the following object for caching. we need to pickle it.
-        class FileMetadata:
-            # the path of the file
-            path: str
-
-            # the ast of the file
-            ast: ast.AST
-
-            # files that were included
-            includes: list[str]
-
-            # checksum of the file at the time of parsing
-            checksum: str
-
-            # original source text
-            source: str
-
-        # load the includes into the cache so include() works as intended. then, parse the specified path
-        for include in metadata.includes:
-            parse(ctx, include, workspace)
-        """
 
         # XXX: a custom import function with arguments bound to our current context
         def _import(*args, ctx=ctx, workspace=workspace, path=path.parent, **kwargs):
